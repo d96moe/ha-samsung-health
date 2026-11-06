@@ -1,0 +1,14 @@
+{
+  "domain": "ha_samsung_health",
+  "name": "Samsung Health",
+  "codeowners": ["@d96moe"],
+  "config_flow": true,
+  "dependencies": ["recorder"],
+  "documentation": "https://github.com/d96moe/ha-samsung-health",
+  "integration_type": "service",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/d96moe/ha-samsung-health/issues",
+  "requirements": ["samsung-re-health==0.7.2"],
+  "single_config_entry": true,
+  "version": "0.1.0"
+}

@@ -1,0 +1,9 @@
+﻿.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+test-results.xml
+# Spike state (tokens), outputs and anything containing real health data.
+spike/.state/
+spike/out/
+spike/private/

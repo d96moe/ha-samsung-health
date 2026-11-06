@@ -1,0 +1,72 @@
+// =============================================================================
+// Jenkinsfile: ha-samsung-health (d96moe)
+// Runs the full pytest suite in a Python venv on the Jenkins agent, then fails the
+// build if any test was skipped (a skip is a false green).
+// =============================================================================
+
+pipeline {
+    agent { label 'built-in' }
+
+    parameters {
+        string(name: 'BRANCH', defaultValue: 'main', description: 'Branch to test')
+    }
+
+    options {
+        disableConcurrentBuilds()
+        timestamps()
+        timeout(time: 15, unit: 'MINUTES')
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                git branch: "${params.BRANCH}",
+                    url: 'https://github.com/d96moe/ha-samsung-health.git'
+            }
+        }
+
+        stage('Lint') {
+            steps {
+                sh """
+                    /usr/local/bin/python3.14 -m venv .venv
+                    .venv/bin/pip install --upgrade pip
+                    .venv/bin/pip install -r requirements_test.txt
+                    .venv/bin/ruff check --select F,E,W,B,I,UP --ignore E501 custom_components tests
+                """
+            }
+        }
+
+        stage('Test') {
+            steps {
+                sh """
+                    .venv/bin/python3.14 -m pytest tests/ \
+                        -p no:cacheprovider \
+                        --tb=short \
+                        -q \
+                        --junitxml=test-results.xml
+                """
+            }
+        }
+
+        stage('Zero-skip gate') {
+            steps {
+                sh '''
+                    SKIPPED=$(grep -oP 'testsuite[^>]*\\bskipped="\\K[0-9]+' test-results.xml | head -1 || echo 0)
+                    echo "Skipped tests: ${SKIPPED:-0}"
+                    if [ "${SKIPPED:-0}" -gt 0 ]; then
+                        echo "ERROR: ${SKIPPED} skipped test(s). The suite must have ZERO skips."
+                        exit 1
+                    fi
+                '''
+            }
+        }
+    }
+
+    post {
+        always {
+            junit allowEmptyResults: true, testResults: 'test-results.xml'
+        }
+        success { echo 'All tests passed.' }
+        failure { echo 'Build failed: check the log above.' }
+    }
+}

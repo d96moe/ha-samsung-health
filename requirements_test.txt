@@ -1,0 +1,3 @@
+samsung-re-health==0.7.2
+pytest-homeassistant-custom-component>=0.13.317
+ruff
