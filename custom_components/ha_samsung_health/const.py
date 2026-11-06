@@ -14,7 +14,11 @@ DEFAULT_LOCALE: Final = "sv-SE"
 # ISO 3166-1 alpha-3, used in the SCSP device profile.
 DEFAULT_PROFILE_COUNTRY: Final = "SWE"
 
-UPDATE_INTERVAL: Final = timedelta(minutes=30)
+#: Each poll downloads the full history (~15-20 GETs), so polling is kept modest;
+#: data is never fresher than the phone's own sync to Samsung Cloud anyway.
+CONF_SCAN_INTERVAL: Final = "scan_interval_minutes"
+SCAN_INTERVAL_OPTIONS: Final = (15, 30, 60, 120)
+DEFAULT_SCAN_INTERVAL: Final = 60
 # Cloud data older than this means the phone has stopped syncing to Samsung Cloud
 # (seen in practice: the phone's cloud sync toggle was off for 10 days).
 STALE_AFTER: Final = timedelta(hours=24)

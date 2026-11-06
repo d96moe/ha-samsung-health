@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from homeassistant.config_entries import ConfigEntry
@@ -23,7 +23,9 @@ from .api import (
     SamsungHealthTransientError,
 )
 from .const import (
+    CONF_SCAN_INTERVAL,
     CONF_STORAGE_KEY,
+    DEFAULT_SCAN_INTERVAL,
     DOMAIN,
     MANIFEST_ACTIVITY,
     MANIFEST_EXERCISE,
@@ -33,7 +35,6 @@ from .const import (
     MANIFEST_WEIGHT,
     MANIFESTS,
     SIGNAL_EXERCISE_UPDATED,
-    UPDATE_INTERVAL,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -61,8 +62,9 @@ class SamsungHealthCoordinator(DataUpdateCoordinator[SamsungHealthData]):
     config_entry: SamsungHealthConfigEntry
 
     def __init__(self, hass: HomeAssistant, entry: SamsungHealthConfigEntry) -> None:
+        minutes = entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
         super().__init__(
-            hass, _LOGGER, name=DOMAIN, update_interval=UPDATE_INTERVAL, config_entry=entry
+            hass, _LOGGER, name=DOMAIN, update_interval=timedelta(minutes=minutes), config_entry=entry
         )
         self.paths = entry_paths(hass, entry.data[CONF_STORAGE_KEY])
         self._api: SamsungHealthApi | None = None

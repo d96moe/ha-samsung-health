@@ -13,10 +13,25 @@ from collections.abc import Mapping
 from typing import Any
 
 import voluptuous as vol
-from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
+from homeassistant.config_entries import ConfigEntry, ConfigFlow, ConfigFlowResult, OptionsFlow
+from homeassistant.core import callback
+from homeassistant.helpers.selector import (
+    SelectOptionDict,
+    SelectSelector,
+    SelectSelectorConfig,
+    SelectSelectorMode,
+)
 
 from .api import SamsungHealthApiError, SamsungHealthAuthError, complete_login, start_login
-from .const import CONF_STORAGE_KEY, DEFAULT_COUNTRY, DEFAULT_LOCALE, DOMAIN
+from .const import (
+    CONF_SCAN_INTERVAL,
+    CONF_STORAGE_KEY,
+    DEFAULT_COUNTRY,
+    DEFAULT_LOCALE,
+    DEFAULT_SCAN_INTERVAL,
+    DOMAIN,
+    SCAN_INTERVAL_OPTIONS,
+)
 from .coordinator import entry_paths
 
 _LOGGER = logging.getLogger(__name__)
@@ -85,6 +100,11 @@ class SamsungHealthConfigFlow(ConfigFlow, domain=DOMAIN):
             errors=errors,
         )
 
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry: ConfigEntry) -> SamsungHealthOptionsFlow:
+        return SamsungHealthOptionsFlow()
+
     async def async_step_reauth(self, entry_data: Mapping[str, Any]) -> ConfigFlowResult:
         self._storage_key = entry_data[CONF_STORAGE_KEY]
         return await self.async_step_reauth_confirm()
@@ -93,3 +113,24 @@ class SamsungHealthConfigFlow(ConfigFlow, domain=DOMAIN):
         if user_input is None:
             return self.async_show_form(step_id="reauth_confirm")
         return await self.async_step_login()
+
+
+class SamsungHealthOptionsFlow(OptionsFlow):
+    """Polling interval. Every poll downloads the full history, so keep it modest."""
+
+    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        if user_input is not None:
+            return self.async_create_entry(
+                data={CONF_SCAN_INTERVAL: int(user_input[CONF_SCAN_INTERVAL])}
+            )
+        current = self.config_entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
+        selector = SelectSelector(
+            SelectSelectorConfig(
+                options=[SelectOptionDict(value=str(m), label=f"{m} min") for m in SCAN_INTERVAL_OPTIONS],
+                mode=SelectSelectorMode.LIST,
+            )
+        )
+        return self.async_show_form(
+            step_id="init",
+            data_schema=vol.Schema({vol.Required(CONF_SCAN_INTERVAL, default=str(current)): selector}),
+        )

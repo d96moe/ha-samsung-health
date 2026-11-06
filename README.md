@@ -63,6 +63,14 @@ years before you installed the integration.
      before you sign in, and copy the address from the Network or Console tab.
 3. Paste it into the setup dialog within 15 minutes.
 
+**Do the sign-in on a computer.** Phone browsers have no developer tools and usually
+drop an `ms-app://` address without showing it. Installing the integration from the
+phone is fine; only the sign-in step needs the computer.
+
+The sign-in is a one-time step. Samsung only accepts this callback address for the
+client id that samsung-re-health uses, so a smoother "enter a code on a web page"
+sign-in isn't possible.
+
 The sign-in is stored under `/config/.storage/ha_samsung_health/` and is refreshed
 automatically. If Samsung stops accepting it, Home Assistant asks you to sign in again.
 
@@ -78,10 +86,21 @@ source:
 
 ## How it works and its limits
 
-- **Polling.** The integration polls every 30 minutes.
+- **Polling.** The integration polls every 60 minutes by default. You can choose 15,
+  30, 60 or 120 minutes under *Configure*.
 - **Full download on every poll.** Samsung's server ignores date filters, so each poll
-  downloads your full history for six data types: about 13,000 records and roughly
-  10 seconds for ten years of data.
+  downloads your full history for six data types: about 13,000 records in roughly
+  15–20 read-only requests, taking about 10 seconds for ten years of data. Data is
+  never fresher than your phone's sync to Samsung Cloud, so polling more often gains
+  little.
+- **History is written to statistics once.** It is written when you first set up the
+  integration. After that, a small fingerprint per statistic and month (kept in
+  `.storage`) means each poll, including the first one after a restart, writes only the
+  months that changed (normally the current one). Rows are updated in place by
+  timestamp, so nothing is ever duplicated. The integration uses Home Assistant's
+  regular statistics API, never direct database access.
+  - If the statistics are deleted from the recorder, they are written again in full on
+    the next poll.
 - **Freshness.** Data is only as fresh as the phone's sync to Samsung Cloud.
 - **Library workarounds.** Two problems in samsung-re-health 0.7.2 are worked around
   without modifying it:

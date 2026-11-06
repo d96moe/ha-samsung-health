@@ -24,6 +24,17 @@
       "wrong_account": "That is a different Samsung account than the one set up."
     }
   },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Samsung Health options",
+        "description": "Every update downloads your full Samsung Health history (Samsung's server has no date filter), about 15-20 requests. Data is never fresher than your phone's own sync to Samsung Cloud, so frequent polling gains little.",
+        "data": {
+          "scan_interval_minutes": "Update interval"
+        }
+      }
+    }
+  },
   "entity": {
     "sensor": {
       "steps": { "name": "Steps" },

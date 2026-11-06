@@ -16,7 +16,7 @@ from homeassistant.util import dt as dt_util
 from .const import CONF_STORAGE_KEY
 from .coordinator import SamsungHealthConfigEntry, SamsungHealthCoordinator, entry_paths
 from .sensor import day_fraction
-from .statistics import StatisticsWriter, build_series
+from .statistics import StatisticsWriter, async_remove_store, build_series
 
 _LOGGER = logging.getLogger(__name__)
 PLATFORMS = [Platform.SENSOR, Platform.BINARY_SENSOR]
@@ -29,7 +29,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: SamsungHealthConfigEntry
     entry.runtime_data = coordinator
     await coordinator.async_config_entry_first_refresh()
 
-    writer = StatisticsWriter(hass)
+    writer = StatisticsWriter(hass, entry.entry_id)
 
     async def _write_statistics() -> None:
         if coordinator.data is None:
@@ -50,7 +50,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: SamsungHealthConfigEntry
     _on_update()
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    entry.async_on_unload(entry.add_update_listener(_async_options_updated))
     return True
+
+
+async def _async_options_updated(hass: HomeAssistant, entry: SamsungHealthConfigEntry) -> None:
+    """Polling interval changed: reload so the coordinator picks it up."""
+    await hass.config_entries.async_reload(entry.entry_id)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: SamsungHealthConfigEntry) -> bool:
@@ -61,6 +67,12 @@ async def async_unload_entry(hass: HomeAssistant, entry: SamsungHealthConfigEntr
 
 
 async def async_remove_entry(hass: HomeAssistant, entry: SamsungHealthConfigEntry) -> None:
-    """Delete the stored Samsung login (tokens) when the entry is removed."""
+    """Delete the stored Samsung login (tokens) and the statistics fingerprints.
+
+    The statistics themselves stay in the recorder (delete them under Developer
+    tools > Statistics if wanted). Without fingerprints, a re-added entry rewrites
+    them in full, which is harmless: rows are upserts.
+    """
     directory = entry_paths(hass, entry.data[CONF_STORAGE_KEY]).directory
     await hass.async_add_executor_job(shutil.rmtree, directory, True)
+    await async_remove_store(hass, entry.entry_id)

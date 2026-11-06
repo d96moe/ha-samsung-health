@@ -60,6 +60,17 @@ async def test_cannot_start_login_aborts(hass):
     assert result["reason"] == "cannot_connect"
 
 
+async def test_options_flow_sets_interval(hass):
+    entry = _entry(hass)
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    assert result["step_id"] == "init"
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"scan_interval_minutes": "120"}
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert entry.options == {"scan_interval_minutes": 120}
+
+
 def _entry(hass) -> MockConfigEntry:
     entry = MockConfigEntry(domain=DOMAIN, unique_id=account_unique_id("user-1"), data={CONF_STORAGE_KEY: "k" * 32})
     entry.add_to_hass(hass)

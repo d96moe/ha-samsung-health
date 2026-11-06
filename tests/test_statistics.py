@@ -6,8 +6,9 @@ from custom_components.ha_samsung_health.statistics import (
     SPECS,
     build_series,
     day_bucket,
-    first_changed,
+    first_changed_month,
     metadata,
+    month_fingerprints,
     statistic_id,
     to_rows,
 )
@@ -48,12 +49,16 @@ def test_body_rows_are_mean_at_measurement_hour():
     assert "sum" not in row
 
 
-def test_first_changed():
-    old = to_rows(SPECS["steps"], build_series(_data(), date(2026, 10, 10), 1)["steps"])
-    new = to_rows(SPECS["steps"], build_series(_data(extra_day=True), date(2026, 10, 10), 1)["steps"])
-    assert first_changed(None, new) == 0
-    assert first_changed(old, old) is None
-    assert first_changed(old, new) == 2
+def test_month_fingerprints_and_first_changed_month():
+    old = month_fingerprints(to_rows(SPECS["steps"], build_series(_data(), date(2026, 10, 10), 1)["steps"]))
+    new = month_fingerprints(
+        to_rows(SPECS["steps"], build_series(_data(extra_day=True), date(2026, 10, 10), 1)["steps"])
+    )
+    assert list(old) == ["2026-10"]
+    assert first_changed_month(None, new) == "2026-10"
+    assert first_changed_month(old, old) is None
+    assert first_changed_month(old, new) == "2026-10"
+    assert first_changed_month({"2026-09": "x", **old}, old) is None  # removed month: nothing to write
 
 
 def test_metadata():

@@ -7,8 +7,15 @@ history; external statistics are never touched by that compile.
 
 Every poll already holds the FULL history in memory (the cloud ignores time
 filters), so every series is computed deterministically from scratch. Cumulative
-`sum` values therefore need no database reads. After the first write following
-startup, only rows from the earliest changed row onwards are written again.
+`sum` values therefore need no database reads.
+
+Full history is written ONCE. A fingerprint (hash) per statistic and calendar
+month is persisted in .storage; on every poll, including the first one after a
+Home Assistant restart, only rows from the first month whose fingerprint changed
+are written (in practice the current month). Rows are upserts on (statistic_id,
+start), so a rewrite never duplicates anything. If the recorder has no rows for a
+statistic although fingerprints exist (statistics deleted, database replaced),
+that statistic is rewritten in full.
 
 Daily rows sit at 12:00 UTC of their day (as in ha-workouts) so the recorder's
 local-day grouping never moves them across a day boundary. Body measurements
@@ -16,6 +23,8 @@ sit at the start of the UTC hour they were taken in.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -27,8 +36,12 @@ from homeassistant.components.recorder.models import (
     StatisticMeanType,
     StatisticMetaData,
 )
-from homeassistant.components.recorder.statistics import async_add_external_statistics
+from homeassistant.components.recorder.statistics import (
+    async_add_external_statistics,
+    get_last_statistics,
+)
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.storage import Store
 
 from . import parsers
 from .const import DOMAIN
@@ -138,14 +151,40 @@ def to_rows(spec: StatSpec, values: list[tuple[datetime, float]]) -> list[Statis
     return rows
 
 
-def first_changed(old: list[StatisticData] | None, new: list[StatisticData]) -> int | None:
-    """Index of the first row that differs, or None if nothing changed."""
-    if old is None:
-        return 0
-    for i, row in enumerate(new):
-        if i >= len(old) or old[i] != row:
-            return i
-    return None if len(old) == len(new) else len(new)
+def _month(row: StatisticData) -> str:
+    return row["start"].strftime("%Y-%m")
+
+
+def month_fingerprints(rows: list[StatisticData]) -> dict[str, str]:
+    """Calendar month (UTC) -> hash of that month's rows."""
+    months: dict[str, list] = {}
+    for row in rows:
+        months.setdefault(_month(row), []).append(
+            [row["start"].timestamp(), row.get("state"), row.get("sum"), row.get("mean")]
+        )
+    return {
+        month: hashlib.sha256(json.dumps(values).encode()).hexdigest()[:16]
+        for month, values in months.items()
+    }
+
+
+def first_changed_month(old: dict[str, str] | None, new: dict[str, str]) -> str | None:
+    """First month whose rows differ from what was written, or None if nothing changed.
+
+    A change in one month also changes every later month of a cumulative series
+    (its sums move), so writing from this month onwards is always enough.
+    """
+    for month in sorted(new):
+        if old is None or old.get(month) != new[month]:
+            return month
+    return None
+
+
+STORAGE_VERSION = 1
+
+
+def store_key(entry_id: str) -> str:
+    return f"{DOMAIN}.{entry_id}.statistics"
 
 
 def metadata(spec: StatSpec) -> StatisticMetaData:
@@ -161,24 +200,58 @@ def metadata(spec: StatSpec) -> StatisticMetaData:
 
 
 class StatisticsWriter:
-    """Remembers what it wrote since startup; writes only what changed."""
+    """Writes only months that changed since the last write, across restarts."""
 
-    def __init__(self, hass: HomeAssistant) -> None:
+    def __init__(self, hass: HomeAssistant, entry_id: str) -> None:
         self.hass = hass
-        self._written: dict[str, list[StatisticData]] = {}
+        self._store: Store[dict] = Store(hass, STORAGE_VERSION, store_key(entry_id))
+        self._fingerprints: dict[str, dict[str, str]] | None = None
+
+    def _keys_missing_in_recorder(self, keys: list[str]) -> list[str]:
+        missing = []
+        for key in keys:
+            spec = SPECS.get(key)
+            types = {"sum"} if spec and spec.cumulative else {"mean"}
+            if not get_last_statistics(self.hass, 1, statistic_id(key), False, types):
+                missing.append(key)
+        return missing
+
+    async def _async_load(self) -> dict[str, dict[str, str]]:
+        stored = await self._store.async_load() or {}
+        fingerprints: dict[str, dict[str, str]] = {
+            k: v for k, v in stored.get("fingerprints", {}).items() if k in SPECS
+        }
+        if fingerprints:
+            missing = await get_instance(self.hass).async_add_executor_job(
+                self._keys_missing_in_recorder, list(fingerprints)
+            )
+            for key in missing:
+                _LOGGER.info("Statistics for %s missing in the recorder; rewriting in full", key)
+                fingerprints.pop(key)
+        return fingerprints
 
     async def async_write(self, series: Series) -> int:
+        if self._fingerprints is None:
+            self._fingerprints = await self._async_load()
         total = 0
         for key, values in series.items():
             spec = SPECS[key]
             rows = to_rows(spec, values)
-            index = first_changed(self._written.get(key), rows)
-            if index is None or index >= len(rows):
+            fingerprints = month_fingerprints(rows)
+            month = first_changed_month(self._fingerprints.get(key), fingerprints)
+            if month is None:
                 continue
-            async_add_external_statistics(self.hass, metadata(spec), rows[index:])
-            self._written[key] = rows
-            total += len(rows) - index
+            changed = [row for row in rows if _month(row) >= month]
+            async_add_external_statistics(self.hass, metadata(spec), changed)
+            self._fingerprints[key] = fingerprints
+            total += len(changed)
         if total:
+            # Only remember what was written once the recorder has committed it.
             await get_instance(self.hass).async_block_till_done()
+            await self._store.async_save({"fingerprints": self._fingerprints})
             _LOGGER.debug("Wrote %d statistic rows", total)
         return total
+
+
+async def async_remove_store(hass: HomeAssistant, entry_id: str) -> None:
+    await Store(hass, STORAGE_VERSION, store_key(entry_id)).async_remove()
