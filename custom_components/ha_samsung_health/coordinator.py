@@ -110,9 +110,27 @@ class SamsungHealthCoordinator(DataUpdateCoordinator[SamsungHealthData]):
         self.paths = entry_paths(hass, entry.data[CONF_STORAGE_KEY])
         self._api: SamsungHealthApi | None = None
         self._lock = asyncio.Lock()
+        self._sync_task: asyncio.Task | None = None
         self._revisions = dict(MANIFESTS)
         self._exercise_fingerprint: frozenset[tuple[str, float | None]] = frozenset()
         self._fetch_stats: dict[str, tuple[int, int, float]] = {}
+
+    @property
+    def syncing(self) -> bool:
+        return self._lock.locked() or (self._sync_task is not None and not self._sync_task.done())
+
+    def async_sync_now(self) -> bool:
+        """Start a download in the background now; False if one is already running.
+
+        Used by the Sync now button. Runs as a background task so the button press
+        (a service call) returns at once instead of waiting 10 s or more.
+        """
+        if self.syncing:
+            return False
+        self._sync_task = self.config_entry.async_create_background_task(
+            self.hass, self.async_refresh(), "ha_samsung_health sync now"
+        )
+        return True
 
     async def async_shutdown(self) -> None:
         await super().async_shutdown()

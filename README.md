@@ -23,6 +23,12 @@ integration reads the same cloud sync that the Samsung Health app itself uses, t
 | Sleep | Sleep duration, Sleep score, Bedtime, Wake-up time | Last night |
 | Recovery | Sleeping heart rate, Sleeping HRV, Energy score | Latest day |
 | Status | Last cloud sync, Cloud sync stale (problem) | — |
+| Control | Sync now (button) | Downloads right away instead of waiting for the next poll |
+
+**Getting the very latest data.** Home Assistant can only read what your phone has
+already synced to Samsung Cloud, and Samsung doesn't publish how often the app does
+that. To be sure, open Samsung Health → Settings → *Sync with Samsung Cloud* → **Sync
+now** on the phone, then press **Sync now** in Home Assistant.
 
 - **Exact values.** Steps, active calories and per-workout calories match the Samsung
   Health app exactly. This was checked against the app's final daily values over 29 days.

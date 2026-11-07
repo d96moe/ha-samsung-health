@@ -67,6 +67,9 @@
     },
     "binary_sensor": {
       "cloud_sync_stale": { "name": "Cloud sync stale" }
+    },
+    "button": {
+      "sync_now": { "name": "Sync now" }
     }
   }
 }

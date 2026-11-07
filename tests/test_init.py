@@ -103,6 +103,22 @@ async def test_setup_does_not_wait_for_the_download(hass, setup):
     assert float(hass.states.get("sensor.samsung_health_weight").state) == 80.5
 
 
+async def test_sync_now_button_downloads_once_at_a_time(hass, setup):
+    entry, _ = setup
+    await _load(hass, entry)
+    polls = FakeApi.polls
+    FakeApi.gate = threading.Event()
+    for _ in range(2):  # second press while the first download runs: ignored
+        await hass.services.async_call(
+            "button", "press", {"entity_id": "button.samsung_health_sync_now"}, blocking=True
+        )
+    assert entry.runtime_data.syncing
+    FakeApi.gate.set()
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert FakeApi.polls == polls + 1
+    assert not entry.runtime_data.syncing
+
+
 async def test_sensors_restore_until_the_download_finishes(hass, setup):
     entry, _ = setup
     mock_restore_cache_with_extra_data(hass, [
