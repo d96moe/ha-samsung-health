@@ -46,6 +46,47 @@ def entry_paths(hass: HomeAssistant, storage_key: str) -> EntryPaths:
     return EntryPaths(Path(hass.config.path(".storage", DOMAIN, storage_key)))
 
 
+type Stats = dict[str, tuple[int, int, float]]
+
+
+@dataclass(slots=True)
+class Prefetched:
+    """A full download made by the config flow, handed to the new entry's first refresh."""
+
+    documents: dict[str, list[dict]]
+    revisions: dict[str, int]
+    stats: Stats
+
+
+def prefetched_store(hass: HomeAssistant) -> dict[str, Prefetched]:
+    """storage_key -> download made during setup, consumed by the first refresh."""
+    return hass.data.setdefault(f"{DOMAIN}_prefetched", {})
+
+
+def fetch_documents(api: SamsungHealthApi, revisions: dict[str, int], stats: Stats) -> dict[str, list[dict]]:
+    """Download every manifest (blocking). Heals `revisions` in place and fills `stats`."""
+    api.initialize()
+    out = {}
+    for manifest, revision in list(revisions.items()):
+        result = api.fetch(manifest, revision)
+        if result.revision != revision:
+            _LOGGER.info("%s: schema revision %s -> %s", manifest, revision, result.revision)
+            revisions[manifest] = result.revision
+        out[manifest] = result.documents
+        stats[manifest] = (result.revision, len(result.documents), round(result.seconds, 1))
+    return out
+
+
+def fetch_history(paths: EntryPaths) -> Prefetched:
+    """One-off full download with its own client (blocking), used right after sign-in."""
+    api = SamsungHealthApi(paths)
+    try:
+        revisions, stats = dict(MANIFESTS), {}
+        return Prefetched(fetch_documents(api, revisions, stats), revisions, stats)
+    finally:
+        api.close()
+
+
 @dataclass(slots=True)
 class SamsungHealthData:
     days: dict[date, parsers.DailyActivity] = field(default_factory=dict)
@@ -83,22 +124,20 @@ class SamsungHealthCoordinator(DataUpdateCoordinator[SamsungHealthData]):
         if self._api is None:
             # Import and client creation do blocking I/O; we are in the executor.
             self._api = SamsungHealthApi(self.paths)
-        self._api.initialize()
-        out = {}
-        for manifest, revision in self._revisions.items():
-            result = self._api.fetch(manifest, revision)
-            if result.revision != revision:
-                _LOGGER.info("%s: schema revision %s -> %s", manifest, revision, result.revision)
-                self._revisions[manifest] = result.revision
-            out[manifest] = result.documents
-            self._fetch_stats[manifest] = (result.revision, len(result.documents), round(result.seconds, 1))
-        return out
+        return fetch_documents(self._api, self._revisions, self._fetch_stats)
 
     async def _async_update_data(self) -> SamsungHealthData:
         self._fetch_stats = {}
+        prefetched = prefetched_store(self.hass).pop(self.config_entry.data[CONF_STORAGE_KEY], None)
         async with self._lock:
             try:
-                docs = await self.hass.async_add_executor_job(self._fetch_all)
+                if prefetched is not None:
+                    # Downloaded seconds ago by the config flow: don't download it all again.
+                    docs = prefetched.documents
+                    self._revisions.update(prefetched.revisions)
+                    self._fetch_stats = prefetched.stats
+                else:
+                    docs = await self.hass.async_add_executor_job(self._fetch_all)
             except SamsungHealthAuthError as exc:
                 raise ConfigEntryAuthFailed(str(exc)) from exc
             except SamsungHealthRateLimited as exc:

@@ -3,9 +3,13 @@
     "step": {
       "login": {
         "title": "Sign in to Samsung",
-        "description": "1. Open [this Samsung sign-in page]({login_url}) and sign in.\n2. When you are done, the browser tries to open an address starting with `ms-app://` and shows an error or a blank page. Copy that whole address. If the address bar doesn't show it, open the browser's developer tools (F12) before signing in and copy it from the Network or Console tab.\n3. Paste it below within 15 minutes.",
+        "description": "Do this on a computer, in Chrome or Edge. Samsung ends the sign-in by sending the browser to an `ms-app://` address meant for its Windows app. The browser can't open it, so you copy it from the developer tools instead.\n\n1. Right-click [this Samsung sign-in link]({login_url}) and choose **Copy link address**.\n2. Open a new browser tab, press **F12** and select the **Network** tab in the developer tools.\n3. Paste the link into that tab's address bar and sign in.\n4. After signing in, the page stays blank with a spinner. That is expected. In the Network list, find the red row with status **(canceled)** whose name starts with `s-1-15-2-`. Right-click it and choose **Copy → Copy URL**.\n5. Paste it below within **5 minutes** and press Submit.\n\nThe README on GitHub has screenshots of each step.",
         "data": {
-          "redirect_url": "ms-app:// address"
+          "redirect_url": "ms-app:// address",
+          "scan_interval_minutes": "Update interval"
+        },
+        "data_description": {
+          "scan_interval_minutes": "How often to check Samsung for new data. Each check downloads your full history, and data is never fresher than your phone's sync, so 60 minutes is usually enough. You can change this later under Configure."
         }
       },
       "reauth_confirm": {
@@ -13,8 +17,11 @@
         "description": "Samsung no longer accepts the stored login. Sign in again to resume syncing."
       }
     },
+    "progress": {
+      "first_sync": "Signed in to Samsung.\n\nNow downloading your Samsung Health history (all of it, back to your first day). This usually takes under a minute. The setup finishes by itself; you don't need to do anything."
+    },
     "error": {
-      "invalid_auth": "That address was not accepted, or the sign-in expired. A new sign-in link has been created: open it and try again.",
+      "invalid_auth": "That address was not accepted. It must be the whole `ms-app://` address, pasted within 5 minutes of signing in. A new sign-in link has been created: follow the steps again.",
       "cannot_connect": "Could not reach Samsung. Try again."
     },
     "abort": {

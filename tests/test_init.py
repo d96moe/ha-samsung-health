@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from typing import ClassVar
 from unittest.mock import patch
 
 import pytest
@@ -19,6 +20,7 @@ from custom_components.ha_samsung_health.const import (
     MANIFEST_WEIGHT,
     SIGNAL_EXERCISE_UPDATED,
 )
+from custom_components.ha_samsung_health.coordinator import Prefetched, prefetched_store
 from custom_components.ha_samsung_health.diagnostics import async_get_config_entry_diagnostics
 
 from .helpers import CET, day_summary, exercise, sleep, step_trend, vitality, weight
@@ -38,7 +40,8 @@ DOCS = {
 
 class FakeApi:
     error: Exception | None = None
-    instances: list["FakeApi"] = []
+    polls = 0
+    instances: ClassVar[list["FakeApi"]] = []
 
     def __init__(self, paths, http=None):
         self.paths = paths
@@ -46,6 +49,7 @@ class FakeApi:
         FakeApi.instances.append(self)
 
     def initialize(self):
+        FakeApi.polls += 1
         if FakeApi.error:
             raise FakeApi.error
 
@@ -62,12 +66,14 @@ async def setup(hass, freezer):
     await hass.config.async_set_time_zone("Europe/Stockholm")
     FakeApi.error = None
     FakeApi.instances = []
+    FakeApi.polls = 0
     written = []
     entry = MockConfigEntry(domain=DOMAIN, unique_id="u", data={CONF_STORAGE_KEY: "a" * 32})
     entry.add_to_hass(hass)
+    record = lambda h, meta, rows: written.append((meta["statistic_id"], rows))
     with patch("custom_components.ha_samsung_health.coordinator.SamsungHealthApi", FakeApi), \
-         patch("custom_components.ha_samsung_health.statistics.async_add_external_statistics",
-               side_effect=lambda h, meta, rows: written.append((meta["statistic_id"], rows))):
+         patch("custom_components.ha_samsung_health.statistics.async_add_external_statistics", side_effect=record), \
+         patch("custom_components.ha_samsung_health.statistics.async_import_statistics", side_effect=record):
         yield entry, written
 
 
@@ -93,7 +99,10 @@ async def test_setup_creates_sensors(hass, setup):
     assert float(state("sleep_score").state) == 81
     # BMR * 0.5 day + 0.819 * 400 + 4 * 0.5
     assert float(state("total_calories_estimated").state) == pytest.approx(1700 * 0.5 + 0.819 * 400 + 2, abs=1)
-    assert "state_class" not in state("steps").attributes
+    assert "state_class" not in state("steps").attributes  # daily total: external statistics
+    assert state("weight").attributes["state_class"] == "measurement"  # history on the entity
+    assert float(state("sleep_duration").state) == 7.0
+    assert state("sleep_duration").attributes["unit_of_measurement"] == "h"
     assert hass.states.get("binary_sensor.samsung_health_cloud_sync_stale").state == "off"
 
 
@@ -101,12 +110,41 @@ async def test_statistics_written_once_then_only_changes(hass, setup):
     entry, written = setup
     await _load(hass, entry)
     ids = {sid for sid, _ in written}
-    assert {"ha_samsung_health:steps", "ha_samsung_health:weight", "ha_samsung_health:sleep_duration"} <= ids
+    assert {"ha_samsung_health:steps", "sensor.samsung_health_weight", "sensor.samsung_health_sleep_duration"} <= ids
+    assert "ha_samsung_health:weight" not in ids
     written.clear()
     await entry.runtime_data.async_refresh()
     await hass.async_block_till_done()
     # Same data: only today's total (time moved? no) -> nothing rewritten.
     assert written == []
+
+
+async def test_first_refresh_uses_download_from_config_flow(hass, setup):
+    entry, _ = setup
+    revisions = {m: 99 for m in DOCS}
+    prefetched_store(hass)["a" * 32] = Prefetched(dict(DOCS), revisions, {MANIFEST_WEIGHT: (99, 1, 0.1)})
+    await _load(hass, entry)
+    assert entry.state is ConfigEntryState.LOADED
+    assert FakeApi.instances == []  # nothing downloaded again
+    assert float(hass.states.get("sensor.samsung_health_weight").state) == 80.5
+    assert prefetched_store(hass) == {}
+    # later polls download as usual, with the healed revisions
+    await entry.runtime_data.async_refresh()
+    assert len(FakeApi.instances) == 1
+    assert entry.runtime_data.data.fetch_stats[MANIFEST_WEIGHT][0] == 99
+
+
+async def test_interval_change_applies_without_reload_or_download(hass, setup):
+    entry, _ = setup
+    await _load(hass, entry)
+    polls = FakeApi.polls
+    coordinator = entry.runtime_data
+    hass.config_entries.async_update_entry(entry, options={"scan_interval_minutes": 15})
+    await hass.async_block_till_done()
+    assert entry.runtime_data is coordinator  # not reloaded
+    assert coordinator.update_interval.total_seconds() == 15 * 60
+    assert FakeApi.polls == polls  # nothing downloaded
+    assert hass.states.get("sensor.samsung_health_steps").state == "6100"  # never unavailable
 
 
 async def test_auth_error_starts_reauth(hass, setup):

@@ -38,6 +38,11 @@ class SamsungHealthTransientError(SamsungHealthApiError):
     """Network problem or server error; retry on the next poll."""
 
 
+#: Pauses (s) before retrying one manifest after a 5xx or network error.
+SERVER_ERROR_RETRY_DELAYS = (2.0, 5.0)
+_sleep = time.sleep  # replaced in tests
+
+
 def http_status(exc: Exception) -> int | None:
     """The library reports failures as text: "<operation> failed with HTTP <code>"."""
     match = _HTTP_STATUS.search(str(exc))
@@ -162,12 +167,20 @@ class SamsungHealthApi:
         started = time.monotonic()
         retried_auth = False
         healed_revision = False
+        server_retries = list(SERVER_ERROR_RETRY_DELAYS)
         while True:
             try:
                 docs = self._iterate(manifest_id, revision)
                 return FetchResult(manifest_id, revision, docs, time.monotonic() - started)
             except Exception as exc:
                 status = http_status(exc)
+                if server_retries and (
+                    (status is not None and status >= 500) or isinstance(exc, httpx.TransportError)
+                ):
+                    # Samsung's server answers an occasional 500; one failed manifest
+                    # shouldn't throw away the whole poll.
+                    _sleep(server_retries.pop(0))
+                    continue
                 if status == 404:
                     # "Content not found for content name": type not available.
                     return FetchResult(manifest_id, revision, [], time.monotonic() - started)

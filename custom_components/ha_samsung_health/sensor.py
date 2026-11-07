@@ -1,5 +1,9 @@
-"""Sensors. No state_class on purpose: long-term history lives in external
-statistics (see statistics.py), which also covers the years before setup."""
+"""Sensors.
+
+Measurements (body, sleep, recovery) have state_class measurement: their full
+history is imported onto the entity's own statistic, so the History panel shows it.
+Daily totals (steps, calories, active time, distance) reset at midnight and have no
+state_class: their history is in external statistics (see statistics.py)."""
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -11,6 +15,7 @@ from homeassistant.components.sensor import (
     SensorDeviceClass,
     SensorEntity,
     SensorEntityDescription,
+    SensorStateClass,
 )
 from homeassistant.const import (
     PERCENTAGE,
@@ -28,6 +33,7 @@ from homeassistant.util import dt as dt_util
 from . import parsers
 from .const import DOMAIN
 from .coordinator import SamsungHealthConfigEntry, SamsungHealthCoordinator, SamsungHealthData
+from .statistics import ENTITY_KEYS
 
 KCAL = "kcal"
 
@@ -169,9 +175,9 @@ SENSORS: tuple[SamsungSensorDescription, ...] = (
     # Sleep, last night
     SamsungSensorDescription(
         key="sleep_duration", translation_key="sleep_duration", device_class=SensorDeviceClass.DURATION,
-        native_unit_of_measurement=UnitOfTime.MINUTES, suggested_unit_of_measurement=UnitOfTime.HOURS,
-        suggested_display_precision=1,
-        value_fn=lambda d, n: (s.duration_min if (s := _last_sleep(d)) else None), attrs_fn=_sleep_attr,
+        native_unit_of_measurement=UnitOfTime.HOURS, suggested_display_precision=1,
+        value_fn=lambda d, n: (s.duration_min / 60 if (s := _last_sleep(d)) and s.duration_min is not None else None),
+        attrs_fn=_sleep_attr,
     ),
     SamsungSensorDescription(
         key="sleep_score", translation_key="sleep_score", icon="mdi:sleep",
@@ -235,6 +241,9 @@ class SamsungHealthSensor(CoordinatorEntity[SamsungHealthCoordinator], SensorEnt
     def __init__(self, coordinator: SamsungHealthCoordinator, description: SamsungSensorDescription) -> None:
         super().__init__(coordinator)
         self.entity_description = description
+        if description.key in ENTITY_KEYS:
+            # History is imported onto this entity's statistic (statistics.py).
+            self._attr_state_class = SensorStateClass.MEASUREMENT
         self._attr_unique_id = f"{coordinator.config_entry.entry_id}_{description.key}"
         self._attr_device_info = device_info(coordinator.config_entry)
 

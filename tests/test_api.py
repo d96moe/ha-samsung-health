@@ -114,6 +114,31 @@ def test_fetch_404_means_type_unavailable(client, monkeypatch):
     assert client.fetch("m.x", 1).documents == []
 
 
+def test_fetch_retries_server_errors_then_succeeds(client, monkeypatch):
+    attempts, pauses = [], []
+
+    def iterate(manifest, revision):
+        attempts.append(1)
+        if len(attempts) < 3:
+            raise SamsungHealthCloudError("document GET failed with HTTP 500")
+        return [{"datauuid": "a"}]
+
+    monkeypatch.setattr(client, "_iterate", iterate)
+    monkeypatch.setattr(api, "_sleep", pauses.append)
+    assert client.fetch("m.x", 1).documents == [{"datauuid": "a"}]
+    assert pauses == list(api.SERVER_ERROR_RETRY_DELAYS)
+
+
+def test_fetch_gives_up_after_repeated_server_errors(client, monkeypatch):
+    def iterate(manifest, revision):
+        raise SamsungHealthCloudError("document GET failed with HTTP 503")
+
+    monkeypatch.setattr(client, "_iterate", iterate)
+    monkeypatch.setattr(api, "_sleep", lambda s: None)
+    with pytest.raises(api.SamsungHealthTransientError):
+        client.fetch("m.x", 1)
+
+
 def test_initialize_without_login_is_auth_error(client):
     with pytest.raises(api.SamsungHealthAuthError):
         client.initialize()

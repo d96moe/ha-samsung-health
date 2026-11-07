@@ -8,12 +8,13 @@ from __future__ import annotations
 
 import logging
 import shutil
+from datetime import timedelta
 
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.util import dt as dt_util
 
-from .const import CONF_STORAGE_KEY
+from .const import CONF_SCAN_INTERVAL, CONF_STORAGE_KEY, DEFAULT_SCAN_INTERVAL
 from .coordinator import SamsungHealthConfigEntry, SamsungHealthCoordinator, entry_paths
 from .sensor import day_fraction
 from .statistics import StatisticsWriter, async_remove_store, build_series
@@ -46,17 +47,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: SamsungHealthConfigEntry
         if coordinator.last_update_success:
             entry.async_create_background_task(hass, _write_statistics(), "ha_samsung_health statistics")
 
+    # Platforms first: measurement history is imported onto the sensor entities, so
+    # they must be registered before the first write.
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(coordinator.async_add_listener(_on_update))
     _on_update()
-
-    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(entry.add_update_listener(_async_options_updated))
     return True
 
 
 async def _async_options_updated(hass: HomeAssistant, entry: SamsungHealthConfigEntry) -> None:
-    """Polling interval changed: reload so the coordinator picks it up."""
-    await hass.config_entries.async_reload(entry.entry_id)
+    """Polling interval changed: apply it in place.
+
+    No reload: a reload would download the full history again and leave the
+    entities unavailable meanwhile, just to change a timer.
+    """
+    minutes = entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
+    entry.runtime_data.update_interval = timedelta(minutes=minutes)
+    _LOGGER.debug("Samsung Health update interval set to %s minutes", minutes)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: SamsungHealthConfigEntry) -> bool:

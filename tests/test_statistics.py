@@ -63,5 +63,13 @@ def test_month_fingerprints_and_first_changed_month():
 
 def test_metadata():
     assert statistic_id("steps") == "ha_samsung_health:steps"
-    assert metadata(SPECS["steps"])["has_sum"] is True
-    assert metadata(SPECS["weight"])["has_sum"] is False
+    steps = metadata(SPECS["steps"])
+    assert steps["has_sum"] is True and steps["source"] == "ha_samsung_health"
+    # measurements go onto the sensor entity's own statistic
+    weight = metadata(SPECS["weight"], "sensor.samsung_health_weight")
+    assert weight["has_sum"] is False
+    assert weight["source"] == "recorder"
+    assert weight["statistic_id"] == "sensor.samsung_health_weight"
+    assert weight["unit_class"] == "mass"
+    assert metadata(SPECS["sleep_duration"], "sensor.x")["unit_class"] == "duration"
+    assert metadata(SPECS["sleep_score"], "sensor.x")["unit_class"] == "unitless"  # as HA's own compile

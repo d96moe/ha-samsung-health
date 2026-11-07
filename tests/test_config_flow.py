@@ -1,3 +1,4 @@
+import asyncio
 from unittest.mock import patch
 
 import pytest
@@ -8,6 +9,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from custom_components.ha_samsung_health.api import SamsungHealthAuthError, SamsungHealthTransientError
 from custom_components.ha_samsung_health.config_flow import account_unique_id
 from custom_components.ha_samsung_health.const import CONF_STORAGE_KEY, DOMAIN
+from custom_components.ha_samsung_health.coordinator import Prefetched, prefetched_store
 
 FLOW = "custom_components.ha_samsung_health.config_flow"
 CALLBACK = "ms-app://s-1-15-2-1?code=a&state=b&auth_server_url=c&retValue=d"
@@ -15,22 +17,66 @@ CALLBACK = "ms-app://s-1-15-2-1?code=a&state=b&auth_server_url=c&retValue=d"
 
 @pytest.fixture(autouse=True)
 def no_setup():
-    with patch("custom_components.ha_samsung_health.async_setup_entry", return_value=True):
+    with patch("custom_components.ha_samsung_health.async_setup_entry", return_value=True), \
+         patch("custom_components.ha_samsung_health.async_unload_entry", return_value=True):
         yield
 
 
-async def test_user_flow_creates_entry(hass):
+PREFETCHED = Prefetched({"m": []}, {"m": 1}, {})
+
+
+async def _sign_in(hass, history, form=None):
+    """Run the flow through sign-in and the history download; returns the final result."""
     with patch(f"{FLOW}.start_login", return_value="https://account.samsung.com/login") as start, \
-         patch(f"{FLOW}.complete_login", return_value="user-1"):
+         patch(f"{FLOW}.complete_login", return_value="user-1"), \
+         patch(f"{FLOW}.fetch_history", **history) as fetch:
         result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
         assert result["type"] is FlowResultType.FORM
         assert result["step_id"] == "login"
         assert result["description_placeholders"]["login_url"] == "https://account.samsung.com/login"
-        result = await hass.config_entries.flow.async_configure(result["flow_id"], {"redirect_url": CALLBACK})
-    assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert len(result["data"][CONF_STORAGE_KEY]) == 32
-    assert result["result"].unique_id == account_unique_id("user-1")
+        gate = asyncio.Event()
+        real = hass.async_add_executor_job
+
+        async def slow_executor(func, *args):
+            if func is fetch:
+                await gate.wait()
+            return await real(func, *args)
+
+        with patch.object(hass, "async_add_executor_job", slow_executor):
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"], {"redirect_url": CALLBACK, **(form or {})}
+            )
+            # Signed in: a progress dialog says so while the history downloads.
+            assert result["type"] is FlowResultType.SHOW_PROGRESS
+            assert result["step_id"] == "first_sync"
+            assert result["progress_action"] == "first_sync"
+            gate.set()
+            await hass.async_block_till_done()
+        result = await hass.config_entries.flow.async_configure(result["flow_id"])
     assert start.call_count == 1
+    return result
+
+
+async def test_user_flow_downloads_history_then_creates_entry(hass):
+    result = await _sign_in(hass, {"return_value": PREFETCHED})
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    key = result["data"][CONF_STORAGE_KEY]
+    assert len(key) == 32
+    assert result["result"].unique_id == account_unique_id("user-1")
+    assert result["result"].options == {"scan_interval_minutes": 60}  # default
+    # handed to the entry's first refresh, so it isn't downloaded twice
+    assert prefetched_store(hass)[key] is PREFETCHED
+
+
+async def test_update_interval_chosen_at_setup(hass):
+    result = await _sign_in(hass, {"return_value": PREFETCHED}, {"scan_interval_minutes": "15"})
+    assert result["result"].options == {"scan_interval_minutes": 15}
+
+
+async def test_failed_first_download_still_creates_entry(hass):
+    result = await _sign_in(hass, {"side_effect": SamsungHealthTransientError("down")})
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert prefetched_store(hass) == {}
 
 
 async def test_invalid_callback_shows_error_and_new_link(hass):
@@ -86,6 +132,7 @@ async def test_reauth(hass, user_id, reason):
         assert result["step_id"] == "reauth_confirm"
         result = await hass.config_entries.flow.async_configure(result["flow_id"], {})
         assert result["step_id"] == "login"
+        assert "scan_interval_minutes" not in result["data_schema"].schema  # only at setup
         result = await hass.config_entries.flow.async_configure(result["flow_id"], {"redirect_url": CALLBACK})
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == reason
