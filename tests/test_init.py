@@ -70,7 +70,10 @@ async def setup(hass, freezer):
     written = []
     entry = MockConfigEntry(domain=DOMAIN, unique_id="u", data={CONF_STORAGE_KEY: "a" * 32})
     entry.add_to_hass(hass)
-    record = lambda h, meta, rows: written.append((meta["statistic_id"], rows))
+
+    def record(h, meta, rows):
+        written.append((meta["statistic_id"], rows))
+
     with patch("custom_components.ha_samsung_health.coordinator.SamsungHealthApi", FakeApi), \
          patch("custom_components.ha_samsung_health.statistics.async_add_external_statistics", side_effect=record), \
          patch("custom_components.ha_samsung_health.statistics.async_import_statistics", side_effect=record):
