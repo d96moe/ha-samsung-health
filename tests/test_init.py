@@ -1,11 +1,13 @@
+import threading
 from datetime import UTC, datetime
 from typing import ClassVar
 from unittest.mock import patch
 
 import pytest
 from homeassistant.config_entries import ConfigEntryState
+from homeassistant.core import State
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+from pytest_homeassistant_custom_component.common import MockConfigEntry, mock_restore_cache_with_extra_data
 
 from custom_components.ha_samsung_health import exercise_api
 from custom_components.ha_samsung_health.api import FetchResult, SamsungHealthAuthError
@@ -41,6 +43,7 @@ DOCS = {
 class FakeApi:
     error: Exception | None = None
     polls = 0
+    gate: threading.Event | None = None  # blocks the download until set
     instances: ClassVar[list["FakeApi"]] = []
 
     def __init__(self, paths, http=None):
@@ -54,6 +57,8 @@ class FakeApi:
             raise FakeApi.error
 
     def fetch(self, manifest, revision):
+        if FakeApi.gate is not None:
+            FakeApi.gate.wait(5)
         return FetchResult(manifest, revision, DOCS[manifest], 0.1)
 
     def close(self):
@@ -67,6 +72,7 @@ async def setup(hass, freezer):
     FakeApi.error = None
     FakeApi.instances = []
     FakeApi.polls = 0
+    FakeApi.gate = None
     written = []
     entry = MockConfigEntry(domain=DOMAIN, unique_id="u", data={CONF_STORAGE_KEY: "a" * 32})
     entry.add_to_hass(hass)
@@ -82,7 +88,40 @@ async def setup(hass, freezer):
 
 async def _load(hass, entry):
     await hass.config_entries.async_setup(entry.entry_id)
+    # the first download runs as a background task
+    await hass.async_block_till_done(wait_background_tasks=True)
+
+
+async def test_setup_does_not_wait_for_the_download(hass, setup):
+    entry, _ = setup
+    FakeApi.gate = threading.Event()
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    assert entry.state is ConfigEntryState.LOADED  # before any data arrived
+    assert hass.states.get("sensor.samsung_health_weight").state == "unknown"
+    FakeApi.gate.set()
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert float(hass.states.get("sensor.samsung_health_weight").state) == 80.5
+
+
+async def test_sensors_restore_until_the_download_finishes(hass, setup):
+    entry, _ = setup
+    mock_restore_cache_with_extra_data(hass, [
+        (State("sensor.samsung_health_weight", "79.0", {"measured_at": "2026-11-01T07:00:00+01:00"}),
+         {"native_value": 79.0, "native_unit_of_measurement": "kg"}),
+        # "today" value from yesterday: not restored
+        (State("sensor.samsung_health_steps", "9000", {"date": "2026-11-05"}),
+         {"native_value": 9000, "native_unit_of_measurement": "steps"}),
+    ])
+    FakeApi.gate = threading.Event()
+    await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
+    weight = hass.states.get("sensor.samsung_health_weight")
+    assert float(weight.state) == 79.0
+    assert weight.attributes["measured_at"] == "2026-11-01T07:00:00+01:00"
+    assert hass.states.get("sensor.samsung_health_steps").state == "unknown"
+    FakeApi.gate.set()
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert float(hass.states.get("sensor.samsung_health_weight").state) == 80.5
 
 
 async def test_setup_creates_sensors(hass, setup):
@@ -154,7 +193,7 @@ async def test_auth_error_starts_reauth(hass, setup):
     entry, _ = setup
     FakeApi.error = SamsungHealthAuthError("authorize failed with HTTP 401")
     await _load(hass, entry)
-    assert entry.state is ConfigEntryState.SETUP_ERROR
+    assert entry.state is ConfigEntryState.LOADED  # setup never waits for Samsung
     flows = hass.config_entries.flow.async_progress_by_handler(DOMAIN)
     assert flows and flows[0]["context"]["source"] == "reauth"
 

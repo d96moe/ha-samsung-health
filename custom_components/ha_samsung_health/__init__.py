@@ -28,7 +28,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: SamsungHealthConfigEntry
     # Set before the first refresh: the refresh fires SIGNAL_EXERCISE_UPDATED, and
     # listeners (ha-workouts) read entry.runtime_data via exercise_api.
     entry.runtime_data = coordinator
-    await coordinator.async_config_entry_first_refresh()
 
     writer = StatisticsWriter(hass, entry.entry_id)
 
@@ -51,8 +50,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: SamsungHealthConfigEntry
     # they must be registered before the first write.
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(coordinator.async_add_listener(_on_update))
-    _on_update()
     entry.async_on_unload(entry.add_update_listener(_async_options_updated))
+
+    # The first download takes 10 s to a few minutes (full history, and Samsung's
+    # server is sometimes slow). It must never hold up Home Assistant's startup, so
+    # setup returns right away and the download runs as a background task, which
+    # startup doesn't wait for. Until it finishes, the sensors show their restored
+    # values. An auth failure still starts reauth (the coordinator does that).
+    entry.async_create_background_task(
+        hass, coordinator.async_refresh(), "ha_samsung_health first refresh"
+    )
     return True
 
 

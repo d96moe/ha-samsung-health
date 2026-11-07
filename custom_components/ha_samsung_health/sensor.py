@@ -12,8 +12,8 @@ from datetime import date, datetime
 from typing import Any
 
 from homeassistant.components.sensor import (
+    RestoreSensor,
     SensorDeviceClass,
-    SensorEntity,
     SensorEntityDescription,
     SensorStateClass,
 )
@@ -234,7 +234,10 @@ async def async_setup_entry(
     async_add_entities(SamsungHealthSensor(coordinator, description) for description in SENSORS)
 
 
-class SamsungHealthSensor(CoordinatorEntity[SamsungHealthCoordinator], SensorEntity):
+class SamsungHealthSensor(CoordinatorEntity[SamsungHealthCoordinator], RestoreSensor):
+    """Until the first download after a restart finishes (it runs in the background,
+    see __init__.py), the sensor shows its value from before the restart."""
+
     _attr_has_entity_name = True
     entity_description: SamsungSensorDescription
 
@@ -246,15 +249,33 @@ class SamsungHealthSensor(CoordinatorEntity[SamsungHealthCoordinator], SensorEnt
             self._attr_state_class = SensorStateClass.MEASUREMENT
         self._attr_unique_id = f"{coordinator.config_entry.entry_id}_{description.key}"
         self._attr_device_info = device_info(coordinator.config_entry)
+        self._restored_value: Any = None
+        self._restored_attrs: dict[str, Any] | None = None
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        if self.coordinator.data is not None:
+            return
+        last_state = await self.async_get_last_state()
+        last_data = await self.async_get_last_sensor_data()
+        if last_state is None or last_data is None:
+            return
+        attrs = {k: v for k, v in last_state.attributes.items() if k in ("date", "measured_at")}
+        if self.entity_description.attrs_fn is _today_attr and attrs.get("date") != dt_util.now().date().isoformat():
+            return  # "today" values from an earlier day would be wrong
+        self._restored_value = last_data.native_value
+        self._restored_attrs = attrs or None
 
     @property
     def native_value(self) -> Any:
         if self.coordinator.data is None:
-            return None
+            return self._restored_value
         return self.entity_description.value_fn(self.coordinator.data, dt_util.utcnow())
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
-        if self.coordinator.data is None or self.entity_description.attrs_fn is None:
+        if self.coordinator.data is None:
+            return self._restored_attrs
+        if self.entity_description.attrs_fn is None:
             return None
         return self.entity_description.attrs_fn(self.coordinator.data, dt_util.utcnow())

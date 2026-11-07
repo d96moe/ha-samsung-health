@@ -137,6 +137,10 @@ source:
   60 or 120 minutes in the setup dialog, and you can change it later under
   *Configure*. A change takes effect without reloading the integration, from the
   next scheduled poll.
+- **Never holds up Home Assistant's startup.** The download runs in the background.
+  Until the first one after a restart finishes, the sensors show their values from
+  before the restart. "Today" values (steps, calories) are only restored if they are
+  from today.
 - **Temporary Samsung errors.** Samsung's server sometimes answers with an error
   (HTTP 500). The integration retries that request twice, after 2 and 5 seconds,
   before giving up. If it still fails, the poll is retried later and the sensors
