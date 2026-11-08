@@ -132,6 +132,22 @@ class SamsungHealthCoordinator(DataUpdateCoordinator[SamsungHealthData]):
         )
         return True
 
+    async def async_sync_and_wait(self) -> None:
+        """Download now and wait until the data is updated (used by the LLM API).
+
+        Joins a download that is already running instead of starting a second one.
+        """
+        if self._sync_task is None or self._sync_task.done():
+            if self._lock.locked():
+                # A scheduled poll is downloading: its result is as fresh as a new one.
+                async with self._lock:
+                    pass
+                await asyncio.sleep(0)  # let the poll publish its data
+                return
+            self.async_sync_now()
+        assert self._sync_task is not None
+        await asyncio.shield(self._sync_task)
+
     async def async_shutdown(self) -> None:
         await super().async_shutdown()
         if self._api is not None:

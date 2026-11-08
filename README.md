@@ -24,6 +24,7 @@ integration reads the same cloud sync that the Samsung Health app itself uses, t
 | Recovery | Sleeping heart rate, Sleeping HRV, Energy score | Latest day |
 | Status | Last cloud sync, Cloud sync stale (problem) | — |
 | Control | Sync now (button) | Downloads right away instead of waiting for the next poll |
+| AI agents | LLM API *Samsung Health* (MCP) | See [AI agents (MCP)](#ai-agents-mcp-the-samsung-health-api) |
 
 **Getting the very latest data.** Home Assistant can only read what your phone has
 already synced to Samsung Cloud, and Samsung doesn't publish how often the app does
@@ -136,6 +137,39 @@ source:
 - Set up this integration first, then add the source in ha-workouts.
 - No second sign-in is needed: ha-workouts reads the sessions this integration has
   already downloaded.
+
+## AI agents (MCP): the Samsung Health API
+
+The integration registers an LLM API called **Samsung Health**. Home Assistant's
+Model Context Protocol server publishes it at its own URL,
+`/api/mcp/ha_samsung_health`. An AI agent connected to that URL sees these tools and
+nothing else in Home Assistant:
+
+| Tool | Returns |
+|---|---|
+| `get_health_summary` | One day (default today): steps, active, exercise and estimated total calories, active time, distance; the latest weighing with body composition, night of sleep and recovery values; that day's workouts; how fresh the data is |
+| `get_history` | One metric between two dates, per day, week or month: totals and daily averages for steps and calories; mean, min and max for weight, body composition, sleep and recovery |
+| `get_workouts` | Workouts, newest first (default the latest 5): type, start and end, duration, calories, mean and max heart rate, distance |
+| `sync_now` | Downloads from Samsung Cloud now and waits for it, so the answer is fresh |
+
+All tools only read, except `sync_now`, which starts a download.
+
+### Connecting claude.ai
+
+You need Home Assistant Cloud (Nabu Casa) remote access, or another public HTTPS
+address for Home Assistant.
+
+1. In Home Assistant, open **Settings → AI**. Under *Model Context Protocol →
+   Individual URLs*, **Samsung Health** is listed. Copy its URL.
+2. In claude.ai, open **Settings → Connectors → Add custom connector**. Paste the
+   URL, with the start replaced by your remote address:
+   `https://<your-id>.ui.nabu.casa/api/mcp/ha_samsung_health`.
+3. Sign in to Home Assistant in the window that opens.
+
+Home Assistant only allows **administrators** to use the individual API URLs, so
+sign in with an admin user. The connector itself can only call the four tools
+above. The sign-in token, however, is an ordinary Home Assistant token for that
+user.
 
 ## How it works and its limits
 

@@ -12,10 +12,12 @@ from datetime import timedelta
 
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import llm
 from homeassistant.util import dt as dt_util
 
 from .const import CONF_SCAN_INTERVAL, CONF_STORAGE_KEY, DEFAULT_SCAN_INTERVAL
 from .coordinator import SamsungHealthConfigEntry, SamsungHealthCoordinator, entry_paths
+from .llm_api import SamsungHealthAPI
 from .sensor import day_fraction
 from .statistics import StatisticsWriter, async_remove_store, build_series
 
@@ -51,6 +53,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: SamsungHealthConfigEntry
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(coordinator.async_add_listener(_on_update))
     entry.async_on_unload(entry.add_update_listener(_async_options_updated))
+    # LLM API "Samsung Health": published by Home Assistant's MCP server at
+    # /api/mcp/ha_samsung_health, for AI agents that should see health data only.
+    entry.async_on_unload(llm.async_register_api(hass, SamsungHealthAPI(hass, entry)))
 
     # The first download takes 10 s to a few minutes (full history, and Samsung's
     # server is sometimes slow). It must never hold up Home Assistant's startup, so

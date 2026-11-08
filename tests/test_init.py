@@ -44,6 +44,7 @@ class FakeApi:
     error: Exception | None = None
     polls = 0
     gate: threading.Event | None = None  # blocks the download until set
+    docs: ClassVar[dict] = DOCS
     instances: ClassVar[list["FakeApi"]] = []
 
     def __init__(self, paths, http=None):
@@ -59,7 +60,7 @@ class FakeApi:
     def fetch(self, manifest, revision):
         if FakeApi.gate is not None:
             FakeApi.gate.wait(5)
-        return FetchResult(manifest, revision, DOCS[manifest], 0.1)
+        return FetchResult(manifest, revision, FakeApi.docs[manifest], 0.1)
 
     def close(self):
         self.closed = True
@@ -73,6 +74,7 @@ async def setup(hass, freezer):
     FakeApi.instances = []
     FakeApi.polls = 0
     FakeApi.gate = None
+    FakeApi.docs = DOCS
     written = []
     entry = MockConfigEntry(domain=DOMAIN, unique_id="u", data={CONF_STORAGE_KEY: "a" * 32})
     entry.add_to_hass(hass)
