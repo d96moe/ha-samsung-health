@@ -30,6 +30,7 @@ from .const import (
     MANIFEST_ACTIVITY,
     MANIFEST_EXERCISE,
     MANIFEST_SLEEP,
+    MANIFEST_SLEEP_STAGE,
     MANIFEST_STEPS,
     MANIFEST_VITALITY,
     MANIFEST_WEIGHT,
@@ -184,7 +185,7 @@ class SamsungHealthCoordinator(DataUpdateCoordinator[SamsungHealthData]):
         data = SamsungHealthData(
             days=parsers.parse_daily_activity(docs[MANIFEST_ACTIVITY], docs[MANIFEST_STEPS], exercises),
             body=parsers.parse_body(docs[MANIFEST_WEIGHT]),
-            sleep=parsers.parse_sleep(docs[MANIFEST_SLEEP]),
+            sleep=parsers.parse_sleep(docs[MANIFEST_SLEEP], docs[MANIFEST_SLEEP_STAGE]),
             recovery=parsers.parse_recovery(docs[MANIFEST_VITALITY]),
             exercises=exercises,
             last_cloud_update=dt_util.utc_from_timestamp(newest / 1000) if newest else None,

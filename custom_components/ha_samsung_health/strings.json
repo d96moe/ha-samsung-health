@@ -57,6 +57,7 @@
       "body_water": { "name": "Body water" },
       "bmr": { "name": "BMR" },
       "sleep_duration": { "name": "Sleep duration" },
+      "time_in_bed": { "name": "Time in bed" },
       "sleep_score": { "name": "Sleep score" },
       "bedtime": { "name": "Bedtime" },
       "wake_time": { "name": "Wake-up time" },

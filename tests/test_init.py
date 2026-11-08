@@ -1,5 +1,5 @@
 import threading
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import ClassVar
 from unittest.mock import patch
 
@@ -17,6 +17,7 @@ from custom_components.ha_samsung_health.const import (
     MANIFEST_ACTIVITY,
     MANIFEST_EXERCISE,
     MANIFEST_SLEEP,
+    MANIFEST_SLEEP_STAGE,
     MANIFEST_STEPS,
     MANIFEST_VITALITY,
     MANIFEST_WEIGHT,
@@ -25,9 +26,11 @@ from custom_components.ha_samsung_health.const import (
 from custom_components.ha_samsung_health.coordinator import Prefetched, prefetched_store
 from custom_components.ha_samsung_health.diagnostics import async_get_config_entry_diagnostics
 
-from .helpers import CET, day_summary, exercise, sleep, step_trend, vitality, weight
+from .helpers import CET, day_summary, exercise, sleep, sleep_stage, step_trend, vitality, weight
 
 NOW = datetime(2026, 11, 6, 11, 0, tzinfo=UTC)  # 12:00 in Stockholm
+
+SLEEP_START = datetime(2026, 11, 5, 22, 0, tzinfo=UTC)
 
 DOCS = {
     MANIFEST_ACTIVITY: [day_summary(2026, 11, 6, calorie=400, steps=6000)],
@@ -36,6 +39,10 @@ DOCS = {
     MANIFEST_WEIGHT: [weight(datetime(2026, 11, 6, 6, 8, tzinfo=UTC), kg=80.5, bmr=1700)],
     MANIFEST_SLEEP: [sleep(datetime(2026, 11, 5, 22, 0, tzinfo=UTC), datetime(2026, 11, 6, 5, 30, tzinfo=UTC),
                            minutes=420, score=81, offset=CET)],
+    MANIFEST_SLEEP_STAGE: [  # 30 min awake, then 7 h asleep
+        sleep_stage(SLEEP_START, SLEEP_START, SLEEP_START + timedelta(minutes=30), stage=40001),
+        sleep_stage(SLEEP_START, SLEEP_START + timedelta(minutes=30), datetime(2026, 11, 6, 5, 30, tzinfo=UTC), stage=40002),
+    ],
     MANIFEST_VITALITY: [vitality(2026, 11, 6, shr=60, shrv=40, score=70.0)],
 }
 
@@ -161,7 +168,8 @@ async def test_setup_creates_sensors(hass, setup):
     assert float(state("total_calories_estimated").state) == pytest.approx(1700 * 0.5 + 0.819 * 400 + 2, abs=1)
     assert "state_class" not in state("steps").attributes  # daily total: external statistics
     assert state("weight").attributes["state_class"] == "measurement"  # history on the entity
-    assert float(state("sleep_duration").state) == 7.0
+    assert float(state("sleep_duration").state) == 7.0  # asleep stages only
+    assert float(state("time_in_bed").state) == 7.5
     assert state("sleep_duration").attributes["unit_of_measurement"] == "h"
     assert hass.states.get("binary_sensor.samsung_health_cloud_sync_stale").state == "off"
 

@@ -1,4 +1,4 @@
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 
@@ -10,6 +10,7 @@ from .helpers import (
     env,
     exercise,
     sleep,
+    sleep_stage,
     step_trend,
     vitality,
     weight,
@@ -65,10 +66,37 @@ def test_exercise_local_day_uses_time_offset():
 def test_sleep_counts_for_wake_up_day():
     [s] = parsers.parse_sleep([
         sleep(datetime(2026, 10, 21, 21, 0, tzinfo=UTC), datetime(2026, 10, 22, 5, 0, tzinfo=UTC),
-              minutes=450, score=75, offset=CEST)
+              minutes=480, score=75, offset=CEST, efficiency=90)
     ])
     assert s.day == date(2026, 10, 22)
-    assert s.duration_min == 450
+    assert s.time_in_bed_min == 480
+    assert s.duration_min == 432  # no stages: time in bed x efficiency
+
+
+def test_split_night_is_its_longest_segment_with_stage_sleep_time():
+    # Like the night to 2026-11-05 checked in the app: two segments; the app shows
+    # the longer one (score 45), actual sleep = its non-awake stages.
+    first = datetime(2026, 11, 4, 21, 3, tzinfo=UTC)
+    main = datetime(2026, 11, 5, 0, 32, tzinfo=UTC)
+    segments = [
+        sleep(first, first + timedelta(minutes=68), minutes=68, score=22),
+        sleep(main, main + timedelta(minutes=326), minutes=326, score=45),
+        # an afternoon nap: shorter, so not the night
+        sleep(datetime(2026, 11, 5, 13, 0, tzinfo=UTC), datetime(2026, 11, 5, 13, 40, tzinfo=UTC),
+              minutes=40, score=50),
+    ]
+    stages = [
+        sleep_stage(main, main, main + timedelta(minutes=31), stage=40001),  # awake
+        sleep_stage(main, main + timedelta(minutes=31), main + timedelta(minutes=200), stage=40002),
+        sleep_stage(main, main + timedelta(minutes=200), main + timedelta(seconds=326 * 60), stage=40004),
+        sleep_stage(first, first, first + timedelta(minutes=68), stage=40002),  # other segment
+    ]
+    [night] = parsers.parse_sleep(segments, stages)
+    assert night.day == date(2026, 11, 5)
+    assert night.score == 45
+    assert night.time_in_bed_min == 326
+    assert night.duration_min == 295
+    assert night.start.hour == 1 and night.start.minute == 32  # local time
 
 
 def test_recovery_and_body():

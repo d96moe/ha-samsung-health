@@ -39,7 +39,8 @@ API_PROMPT = (
     "YYYY-MM-DD in the user's local time zone. Data is only as fresh as the phone's "
     "last sync to Samsung Cloud: check data_freshness, and if it looks old, call "
     "sync_now (it fetches whatever the phone has synced; it can't make the phone "
-    "sync). Total calories are an estimate (BMR + 0.82 x active calories); steps, "
+    "sync). A night of sleep is its longest segment, as in the app: actual sleep "
+    "excludes time awake, time in bed is the whole segment. Total calories are an estimate (BMR + 0.82 x active calories); steps, "
     "active calories and workout calories match the Samsung Health app exactly."
 )
 
@@ -160,7 +161,8 @@ def summary(data: SamsungHealthData, day: date, today: date, now: datetime) -> d
             "wake_up_date": sleep.day.isoformat(),
             "bedtime": sleep.start.isoformat(),
             "wake_time": sleep.end.isoformat(),
-            "duration_h": _r(sleep.duration_min / 60, 2) if sleep.duration_min is not None else None,
+            "actual_sleep_h": _r(sleep.duration_min / 60, 2) if sleep.duration_min is not None else None,
+            "time_in_bed_h": _r(sleep.time_in_bed_min / 60, 2) if sleep.time_in_bed_min is not None else None,
             "sleep_score": _r(sleep.score, 0),
         },
         "recovery_latest_day": recovery and {

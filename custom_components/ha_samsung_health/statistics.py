@@ -88,6 +88,7 @@ SPECS: dict[str, StatSpec] = {
         StatSpec("body_water", "Samsung Health body water", "kg", False, "weight"),
         StatSpec("bmr", "Samsung Health BMR", "kcal", False),
         StatSpec("sleep_duration", "Samsung Health sleep duration", "h", False, "duration"),
+        StatSpec("time_in_bed", "Samsung Health time in bed", "h", False, "duration"),
         StatSpec("sleep_score", "Samsung Health sleep score", None, False),
         StatSpec("sleeping_heart_rate", "Samsung Health sleeping heart rate", "bpm", False),
         StatSpec("sleeping_hrv", "Samsung Health sleeping HRV", "ms", False),
@@ -146,6 +147,7 @@ def build_series(data, today: date, today_fraction: float) -> Series:
 
     for s in data.sleep:
         add("sleep_duration", day_bucket(s.day), s.duration_min / 60 if s.duration_min is not None else None)
+        add("time_in_bed", day_bucket(s.day), s.time_in_bed_min / 60 if s.time_in_bed_min is not None else None)
         add("sleep_score", day_bucket(s.day), s.score)
 
     for day in sorted(data.recovery):

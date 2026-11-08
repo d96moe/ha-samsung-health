@@ -14,6 +14,7 @@ from typing import Any
 
 from .const import (
     BMR_MEDIAN_WINDOW,
+    SLEEP_STAGE_AWAKE,
     TOTAL_KCAL_ACTIVE_FACTOR,
     TOTAL_KCAL_OFFSET,
 )
@@ -108,8 +109,9 @@ class SleepSession:
     day: date  # wake-up day
     start: datetime
     end: datetime
-    duration_min: float | None
+    duration_min: float | None  # actual sleep: the app's "verklig sovtid"
     score: float | None
+    time_in_bed_min: float | None = None  # the app's total time
 
 
 @dataclass(slots=True)
@@ -212,22 +214,60 @@ def parse_body(envelopes: Iterable[dict[str, Any]]) -> list[BodyMeasurement]:
     return sorted(out, key=lambda m: m.measured_at)
 
 
-def parse_sleep(envelopes: Iterable[dict[str, Any]]) -> list[SleepSession]:
-    out = []
-    for rec in records(envelopes):
+SLEEP_DAY_SHIFT = timedelta(hours=6)
+
+
+def asleep_minutes_by_segment(stage_envelopes: Iterable[dict[str, Any]]) -> dict[str, float]:
+    """Segment datauuid -> minutes in a non-awake stage, for segments that have stages."""
+    asleep_ms: dict[str, float] = defaultdict(float)
+    for rec in records(stage_envelopes):
+        sleep_id = rec.get("sleep_id")
+        start, end = _num(rec.get("start_time")), _num(rec.get("end_time"))
+        if not isinstance(sleep_id, str) or start is None or end is None or end <= start:
+            continue
+        asleep_ms[sleep_id] += 0.0 if rec.get("stage") == SLEEP_STAGE_AWAKE else end - start
+    return {sleep_id: ms / 60000 for sleep_id, ms in asleep_ms.items()}
+
+
+def parse_sleep(
+    sleep_envelopes: Iterable[dict[str, Any]], stage_envelopes: Iterable[dict[str, Any]] = ()
+) -> list[SleepSession]:
+    """One night per wake-up day: that day's longest segment, as the app shows it.
+
+    A night is often several segments (woke up, fell asleep again). The Samsung
+    Health app shows the longest one, with its own score and times; naps lose
+    to the night's main sleep. Actual sleep is the segment's non-awake stage time,
+    or time in bed x efficiency for old segments without stages.
+    """
+    asleep = asleep_minutes_by_segment(stage_envelopes)
+    nights: dict[date, SleepSession] = {}
+    for rec in records(sleep_envelopes):
         start, end = local_datetime(rec, "start_time"), local_datetime(rec, "end_time")
         if start is None or end is None or end <= start:
             continue
-        out.append(
-            SleepSession(
-                day=end.date(),
-                start=start,
-                end=end,
-                duration_min=_num(rec.get("sleep_duration")),  # minutes
-                score=_num(rec.get("sleep_score")),
-            )
+        in_bed = (end - start).total_seconds() / 60
+        segment_id = rec.get("datauuid")
+        if isinstance(segment_id, str) and segment_id in asleep:
+            actual = asleep[segment_id]
+        elif (efficiency := _num(rec.get("efficiency"))) is not None and efficiency > 0:
+            actual = in_bed * efficiency / 100
+        else:
+            actual = None
+        session = SleepSession(
+            # Wake-up day of the night a segment belongs to: an evening segment
+            # ending 23:11 belongs to the next morning's night, a nap ending 16:00
+            # to today's (where it loses to the longer night).
+            day=(end + SLEEP_DAY_SHIFT).date(),
+            start=start,
+            end=end,
+            duration_min=actual,
+            score=_num(rec.get("sleep_score")),
+            time_in_bed_min=in_bed,
         )
-    return sorted(out, key=lambda s: s.end)
+        current = nights.get(session.day)
+        if current is None or in_bed > (current.time_in_bed_min or 0):
+            nights[session.day] = session
+    return sorted(nights.values(), key=lambda s: s.end)
 
 
 def parse_recovery(envelopes: Iterable[dict[str, Any]]) -> dict[date, RecoveryDay]:

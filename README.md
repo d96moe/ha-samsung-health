@@ -20,7 +20,7 @@ integration reads the same cloud sync that the Samsung Health app itself uses, t
 |---|---|---|
 | Activity | Steps, Active calories, Total calories (estimated), Exercise calories, Active time, Distance | Today so far |
 | Body | Weight, Body fat, Body fat mass, Skeletal muscle mass, Body water, BMR | Latest weighing |
-| Sleep | Sleep duration, Sleep score, Bedtime, Wake-up time | Last night |
+| Sleep | Sleep duration (actual sleep), Time in bed, Sleep score, Bedtime, Wake-up time | Last night, as the app shows it |
 | Recovery | Sleeping heart rate, Sleeping HRV, Energy score | Latest day |
 | Status | Last cloud sync, Cloud sync stale (problem) | — |
 | Control | Sync now (button) | Downloads right away instead of waiting for the next poll |
@@ -37,6 +37,12 @@ now** on the phone, then press **Sync now** in Home Assistant.
   The integration estimates it as `BMR + 0.82 × active calories`, using the median BMR
   of your last 7 weighings. Over those 29 days it was within ±54 kcal of the app, with
   a typical error of ±25 kcal.
+- **Sleep as the app shows it.** Samsung stores a night as one or more segments
+  (you woke up and fell asleep again). Like the app, the integration shows the
+  night's longest segment: its score, bedtime and wake-up time. *Time in bed* is
+  that segment's length, and *Sleep duration* is the actual sleep time, its time in
+  light, deep and REM sleep. Both matched the app to the minute on the nights
+  checked. Old segments without sleep stages use time in bed × efficiency.
 
 ### History
 
@@ -186,8 +192,8 @@ user.
   before giving up. If it still fails, the poll is retried later and the sensors
   keep their last values.
 - **Full download on every poll.** Samsung's server ignores date filters, so each poll
-  downloads your full history for six data types: about 13,000 records in roughly
-  15–20 read-only requests, taking about 10 seconds for ten years of data. Data is
+  downloads your full history for seven data types: about 85,000 records (most of them
+  sleep stages) in read-only requests, taking about 20 seconds for ten years of data. Data is
   never fresher than your phone's sync to Samsung Cloud, so polling more often gains
   little.
 - **History is written to statistics once.** It is written right after you first set

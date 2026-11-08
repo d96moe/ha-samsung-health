@@ -75,7 +75,8 @@ def weight(at_utc: datetime, *, kg: float, bmr: int, offset: int = CET) -> dict:
     })
 
 
-def sleep(start_utc: datetime, end_utc: datetime, *, minutes: int, score: int, offset: int = CET) -> dict:
+def sleep(start_utc: datetime, end_utc: datetime, *, minutes: int, score: int, offset: int = CET,
+          efficiency: float | None = None) -> dict:
     return env({
         "datauuid": f"sl-{ms(start_utc)}",
         "start_time": ms(start_utc),
@@ -83,6 +84,19 @@ def sleep(start_utc: datetime, end_utc: datetime, *, minutes: int, score: int, o
         "time_offset": offset,
         "sleep_duration": minutes,
         "sleep_score": score,
+        "efficiency": efficiency,
+        "update_time": ms(end_utc),
+    })
+
+
+def sleep_stage(sleep_start_utc: datetime, start_utc: datetime, end_utc: datetime, *, stage: int) -> dict:
+    """A stage of the segment that starts at sleep_start_utc (see sleep())."""
+    return env({
+        "datauuid": f"st-{ms(start_utc)}",
+        "sleep_id": f"sl-{ms(sleep_start_utc)}",
+        "start_time": ms(start_utc),
+        "end_time": ms(end_utc),
+        "stage": stage,
         "update_time": ms(end_utc),
     })
 

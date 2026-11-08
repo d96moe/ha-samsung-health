@@ -1,6 +1,6 @@
 import asyncio
 import threading
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 import probatio
@@ -14,13 +14,16 @@ from custom_components.ha_samsung_health.const import (
     MANIFEST_ACTIVITY,
     MANIFEST_EXERCISE,
     MANIFEST_SLEEP,
+    MANIFEST_SLEEP_STAGE,
     MANIFEST_STEPS,
     MANIFEST_VITALITY,
     MANIFEST_WEIGHT,
 )
 
-from .helpers import CET, day_summary, exercise, sleep, step_trend, vitality, weight
+from .helpers import CET, day_summary, exercise, sleep, sleep_stage, step_trend, vitality, weight
 from .test_init import NOW, FakeApi
+
+SLEEP_START = datetime(2026, 11, 5, 22, 0, tzinfo=UTC)
 
 DOCS = {
     MANIFEST_ACTIVITY: [
@@ -41,6 +44,10 @@ DOCS = {
     ],
     MANIFEST_SLEEP: [sleep(datetime(2026, 11, 5, 22, 0, tzinfo=UTC), datetime(2026, 11, 6, 5, 30, tzinfo=UTC),
                            minutes=420, score=81, offset=CET)],
+    MANIFEST_SLEEP_STAGE: [  # 30 min awake, then 7 h asleep
+        sleep_stage(SLEEP_START, SLEEP_START, SLEEP_START + timedelta(minutes=30), stage=40001),
+        sleep_stage(SLEEP_START, SLEEP_START + timedelta(minutes=30), datetime(2026, 11, 6, 5, 30, tzinfo=UTC), stage=40002),
+    ],
     MANIFEST_VITALITY: [vitality(2026, 11, 6, shr=60, shrv=40, score=70.0)],
 }
 
@@ -102,7 +109,8 @@ async def test_summary_today(api):
     assert data["activity"]["active_calories_kcal"] == 400
     assert "note" in data["activity"]
     assert data["body_latest_weighing"]["weight_kg"] == 80.5
-    assert data["sleep_latest_night"]["duration_h"] == 7.0
+    assert data["sleep_latest_night"]["actual_sleep_h"] == 7.0
+    assert data["sleep_latest_night"]["time_in_bed_h"] == 7.5
     assert data["recovery_latest_day"]["sleeping_heart_rate_bpm"] == 60
     assert data["workouts"][0]["type"] == "other" and data["workouts"][0]["exercise_type_code"] == 99999
     assert data["data_freshness"]["last_cloud_sync"] is not None

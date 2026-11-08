@@ -32,7 +32,14 @@ MANIFEST_STEPS: Final = "com.samsung.shealth.step_daily_trend"
 MANIFEST_EXERCISE: Final = "com.samsung.health.exercise"
 MANIFEST_WEIGHT: Final = "com.samsung.health.weight"
 MANIFEST_VITALITY: Final = "com.samsung.shealth.vitality_score"
-MANIFEST_SLEEP: Final = "com.samsung.shealth.sleep_combined"
+# Sleep segments, one per continuous sleep. Not "shealth.sleep_combined": that only
+# held nights Samsung had merged from several segments, and it stopped getting new
+# nights on 2026-10-29 (verified 2026-11-08). The app shows a night's longest segment.
+MANIFEST_SLEEP: Final = "com.samsung.health.sleep"
+# Sleep stages per segment (sleep_id = the segment's datauuid). The app's "actual
+# sleep time" is the segment's non-awake stage time (verified against two nights).
+MANIFEST_SLEEP_STAGE: Final = "com.samsung.health.sleep_stage"
+SLEEP_STAGE_AWAKE: Final = 40001
 
 MANIFESTS: Final[dict[str, int]] = {
     MANIFEST_ACTIVITY: 5,
@@ -40,7 +47,8 @@ MANIFESTS: Final[dict[str, int]] = {
     MANIFEST_EXERCISE: 36,
     MANIFEST_WEIGHT: 12,
     MANIFEST_VITALITY: 3,
-    MANIFEST_SLEEP: 9,
+    MANIFEST_SLEEP: 19,
+    MANIFEST_SLEEP_STAGE: 6,
 }
 
 # Empirical fit against 29 days of final values from the Samsung Health app

@@ -180,6 +180,12 @@ SENSORS: tuple[SamsungSensorDescription, ...] = (
         attrs_fn=_sleep_attr,
     ),
     SamsungSensorDescription(
+        key="time_in_bed", translation_key="time_in_bed", device_class=SensorDeviceClass.DURATION,
+        native_unit_of_measurement=UnitOfTime.HOURS, suggested_display_precision=1,
+        value_fn=lambda d, n: (s.time_in_bed_min / 60 if (s := _last_sleep(d)) and s.time_in_bed_min is not None else None),
+        attrs_fn=_sleep_attr,
+    ),
+    SamsungSensorDescription(
         key="sleep_score", translation_key="sleep_score", icon="mdi:sleep",
         value_fn=lambda d, n: (s.score if (s := _last_sleep(d)) else None), attrs_fn=_sleep_attr,
     ),
