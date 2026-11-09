@@ -7,3 +7,5 @@ test-results.xml
 spike/.state/
 spike/out/
 spike/private/
+docs/superpowers/
+.superpowers/
