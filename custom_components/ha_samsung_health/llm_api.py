@@ -1,7 +1,7 @@
 """LLM API "Samsung Health": read-only health tools (plus Sync now) for AI agents.
 
 Home Assistant's MCP server publishes every registered LLM API at its own URL,
-/api/mcp/<api id>, so an agent such as claude.ai can be given this API alone:
+/api/mcp/<api id>, so an MCP client can be given this API alone:
 it sees health data and nothing else in Home Assistant.
 
 Everything is answered from the coordinator's in-memory data, which holds the

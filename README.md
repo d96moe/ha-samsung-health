@@ -160,22 +160,27 @@ nothing else in Home Assistant:
 
 All tools only read, except `sync_now`, which starts a download.
 
-### Connecting claude.ai
+### Connecting an AI agent (optional)
 
-You need Home Assistant Cloud (Nabu Casa) remote access, or another public HTTPS
-address for Home Assistant.
+Using the API is optional; the sensors and statistics work without it. If you want
+an AI agent or assistant to answer questions about your health data, connect any
+client that supports remote MCP servers to the API's URL:
 
 1. In Home Assistant, open **Settings → AI**. Under *Model Context Protocol →
    Individual URLs*, **Samsung Health** is listed. Copy its URL.
-2. In claude.ai, open **Settings → Connectors → Add custom connector**. Paste the
-   URL, with the start replaced by your remote address:
-   `https://<your-id>.ui.nabu.casa/api/mcp/ha_samsung_health`.
-3. Sign in to Home Assistant in the window that opens.
+2. Add that URL as an MCP server in your client. A client outside your home
+   network needs Home Assistant's remote address, for example
+   `https://<your-id>.ui.nabu.casa/api/mcp/ha_samsung_health` with Home Assistant
+   Cloud (Nabu Casa), or another public HTTPS address.
+3. Sign in to Home Assistant when the client asks.
 
 Home Assistant only allows **administrators** to use the individual API URLs, so
-sign in with an admin user. The connector itself can only call the four tools
+sign in with an admin user. Through that URL the client can only call the four tools
 above. The sign-in token, however, is an ordinary Home Assistant token for that
 user.
+
+For example, in **claude.ai**: open *Settings → Connectors → Add custom connector*,
+paste the remote URL, and sign in to Home Assistant in the window that opens.
 
 ## How it works and its limits
 
@@ -218,10 +223,10 @@ user.
 ```
 python -m venv .venv
 .venv/bin/pip install -r requirements_test.txt
-.venv/bin/python -m pytest tests
+.venv/bin/python -m pytest tests --timeout 30
 ```
 
-The Home Assistant test plugin needs Linux. See [ci/README.md](ci/README.md).
+The Home Assistant test plugin needs Linux, macOS or WSL. See [ci/README.md](ci/README.md).
 
 ## License
 
