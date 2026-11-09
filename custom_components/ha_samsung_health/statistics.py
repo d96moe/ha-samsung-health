@@ -5,9 +5,11 @@ Two kinds, because they behave differently:
 - Measurements (weight, body composition, sleep, recovery) are imported onto the
   sensor entity's own statistic (statistic_id = the entity id, source "recorder";
   the entities have state_class measurement). So the full history shows up where
-  you look for it: the entity's History and more-info graphs. The recorder's own
-  hourly compile and the import don't conflict: both write the measured value,
-  upserted per hour, and means have no running sum to keep consistent.
+  you look for it: the entity's History and more-info graphs. The import upserts,
+  but the recorder's own hourly compile only inserts: a row imported into an hour
+  it hasn't compiled yet makes that compile fail and roll back the hour for every
+  entity. So rows are only imported for hours already compiled (COMPILE_MARGIN);
+  newer ones wait for a later poll.
 - Daily totals (steps, calories) stay external statistics
   ("ha_samsung_health:<key>"), and those entities have no state_class. Their
   value resets at midnight, so the recorder would keep its own running sum on the
@@ -37,7 +39,7 @@ import json
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, date, datetime, time
+from datetime import UTC, date, datetime, time, timedelta
 
 from homeassistant.components.recorder import DOMAIN as RECORDER_DOMAIN
 from homeassistant.components.recorder import get_instance
@@ -56,6 +58,7 @@ from homeassistant.components.sensor.const import UNIT_CONVERTERS
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.storage import Store
+from homeassistant.util import dt as dt_util
 
 from . import parsers
 from .const import DOMAIN
@@ -202,6 +205,18 @@ def first_changed_month(old: dict[str, str] | None, new: dict[str, str]) -> str 
     return None
 
 
+#: The recorder compiles an hour a few minutes after it ends; leave it this long.
+COMPILE_MARGIN = timedelta(minutes=15)
+
+
+def compiled_hours_end(now: datetime) -> datetime:
+    """Start of the first hour the recorder may not have compiled yet.
+
+    Hour H is compiled once now >= H + 1 h + margin, i.e. H < floor(now - margin).
+    """
+    return hour_bucket(now - COMPILE_MARGIN)
+
+
 STORAGE_VERSION = 1
 #: 1: everything external (v0.1.x). 2: measurements on the sensor entities.
 LAYOUT = 2
@@ -311,9 +326,16 @@ class StatisticsWriter:
         first_load = self._fingerprints is None
         if self._fingerprints is None:
             self._fingerprints = await self._async_load()
+        compiled_before = compiled_hours_end(dt_util.utcnow())
         total = 0
         for key, values in series.items():
             spec = SPECS[key]
+            if not spec.cumulative:
+                # Rows on the sensor entity's own statistic must not reach an hour the
+                # recorder hasn't compiled yet: its hourly compile inserts (no upsert),
+                # so it would hit our row, fail and roll back that hour for EVERY entity.
+                # Held-back rows aren't fingerprinted, so a later poll writes them.
+                values = [(start, value) for start, value in values if start < compiled_before]
             rows = to_rows(spec, values)
             fingerprints = month_fingerprints(rows)
             month = first_changed_month(self._fingerprints.get(key), fingerprints)

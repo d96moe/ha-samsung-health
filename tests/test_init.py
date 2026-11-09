@@ -174,17 +174,24 @@ async def test_setup_creates_sensors(hass, setup):
     assert hass.states.get("binary_sensor.samsung_health_cloud_sync_stale").state == "off"
 
 
-async def test_statistics_written_once_then_only_changes(hass, setup):
+async def test_statistics_written_once_then_only_changes(hass, setup, freezer):
     entry, written = setup
     await _load(hass, entry)
     ids = {sid for sid, _ in written}
-    assert {"ha_samsung_health:steps", "sensor.samsung_health_weight", "sensor.samsung_health_sleep_duration"} <= ids
+    assert {"ha_samsung_health:steps", "sensor.samsung_health_weight"} <= ids
     assert "ha_samsung_health:weight" not in ids
+    # Last night's sleep sits at 12:00 UTC today, an hour the recorder hasn't
+    # compiled at 11:00 UTC: held back, not written into it.
+    assert "sensor.samsung_health_sleep_duration" not in ids
     written.clear()
     await entry.runtime_data.async_refresh()
     await hass.async_block_till_done()
-    # Same data: only today's total (time moved? no) -> nothing rewritten.
+    # Same data: nothing rewritten.
     assert written == []
+    freezer.move_to(NOW + timedelta(hours=2, minutes=20))  # 12:00 UTC compiled by now
+    await entry.runtime_data.async_refresh()
+    await hass.async_block_till_done()
+    assert "sensor.samsung_health_sleep_duration" in {sid for sid, _ in written}
 
 
 async def test_first_refresh_uses_download_from_config_flow(hass, setup):

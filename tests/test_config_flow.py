@@ -9,7 +9,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from custom_components.ha_samsung_health.api import SamsungHealthAuthError, SamsungHealthTransientError
 from custom_components.ha_samsung_health.config_flow import account_unique_id
 from custom_components.ha_samsung_health.const import CONF_STORAGE_KEY, DOMAIN
-from custom_components.ha_samsung_health.coordinator import Prefetched, prefetched_store
+from custom_components.ha_samsung_health.coordinator import Prefetched, entry_paths, prefetched_store
 
 FLOW = "custom_components.ha_samsung_health.config_flow"
 CALLBACK = "ms-app://s-1-15-2-1?code=a&state=b&auth_server_url=c&retValue=d"
@@ -126,15 +126,28 @@ def _entry(hass) -> MockConfigEntry:
 @pytest.mark.parametrize(("user_id", "reason"), [("user-1", "reauth_successful"), ("other", "wrong_account")])
 async def test_reauth(hass, user_id, reason):
     entry = _entry(hass)
+    entry_dir = entry_paths(hass, "k" * 32).directory
+    entry_dir.mkdir(parents=True, exist_ok=True)
+    (entry_dir / "master.json").write_text("old login of user-1")
+
+    def login(paths, url):  # what the library does: write the new login into the directory
+        paths.directory.mkdir(parents=True, exist_ok=True)
+        (paths.directory / "master.json").write_text(f"new login of {user_id}")
+        return user_id
+
     with patch(f"{FLOW}.start_login", return_value="https://x/1"), \
-         patch(f"{FLOW}.complete_login", return_value=user_id) as complete:
+         patch(f"{FLOW}.complete_login", side_effect=login) as complete:
         result = await entry.start_reauth_flow(hass)
         assert result["step_id"] == "reauth_confirm"
         result = await hass.config_entries.flow.async_configure(result["flow_id"], {})
         assert result["step_id"] == "login"
         assert "scan_interval_minutes" not in result["data_schema"].schema  # only at setup
         result = await hass.config_entries.flow.async_configure(result["flow_id"], {"redirect_url": CALLBACK})
+        await hass.async_block_till_done()
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == reason
-    # reauth reuses the entry's own storage directory
-    assert complete.call_args.args[0].directory.name == "k" * 32
+    # The login is staged elsewhere; only the right account ever reaches the entry's directory.
+    assert complete.call_args.args[0].directory != entry_dir
+    expected = "new login of user-1" if reason == "reauth_successful" else "old login of user-1"
+    assert (entry_dir / "master.json").read_text() == expected
+    assert [p.name for p in entry_dir.parent.iterdir()] == ["k" * 32]  # no staging left behind

@@ -209,6 +209,12 @@ paste the remote URL, and sign in to Home Assistant in the window that opens.
   regular statistics API, never direct database access.
   - If the statistics are deleted from the recorder, they are written again in full on
     the next poll.
+  - Body, sleep and recovery values are only written into hours the recorder has
+    already compiled (about 15 minutes after the hour ends). Writing into a newer
+    hour would make the recorder's own hourly compile fail for every entity in
+    Home Assistant. So a new weighing, or last night's sleep (stored at 12:00 UTC of
+    the wake-up day), appears in the History graph a poll or two later. The sensors
+    themselves show it right away.
 - **Freshness.** Data is only as fresh as the phone's sync to Samsung Cloud.
 - **Library workarounds.** Two problems in samsung-re-health 0.7.2 are worked around
   without modifying it:

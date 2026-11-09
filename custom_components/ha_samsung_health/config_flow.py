@@ -10,8 +10,10 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import shutil
 import uuid
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
 
 import voluptuous as vol
@@ -38,6 +40,17 @@ from .coordinator import entry_paths, fetch_history, prefetched_store
 
 _LOGGER = logging.getLogger(__name__)
 CONF_REDIRECT_URL = "redirect_url"
+REAUTH_STAGING_PREFIX = "reauth-"
+
+
+def _swap_in(staging: Path, target: Path) -> None:
+    """Replace the entry's login directory with the staged one (blocking)."""
+    old = target.with_name(f"{target.name}.old")
+    shutil.rmtree(old, ignore_errors=True)
+    if target.exists():
+        target.rename(old)
+    staging.rename(target)
+    shutil.rmtree(old, ignore_errors=True)
 
 
 def interval_selector() -> SelectSelector:
@@ -94,8 +107,15 @@ class SamsungHealthConfigFlow(ConfigFlow, domain=DOMAIN):
             else:
                 await self.async_set_unique_id(account_unique_id(user_id))
                 if self.source == "reauth":
-                    self._abort_if_unique_id_mismatch(reason="wrong_account")
-                    return self.async_update_reload_and_abort(self._get_reauth_entry())
+                    entry = self._get_reauth_entry()
+                    staging = entry_paths(self.hass, self._storage_key).directory
+                    if entry.unique_id != self.unique_id:
+                        # Another account: its login never reaches the entry's directory.
+                        await self.hass.async_add_executor_job(shutil.rmtree, staging, True)
+                        return self.async_abort(reason="wrong_account")
+                    target = entry_paths(self.hass, entry.data[CONF_STORAGE_KEY]).directory
+                    await self.hass.async_add_executor_job(_swap_in, staging, target)
+                    return self.async_update_reload_and_abort(entry)
                 self._abort_if_unique_id_configured()
                 return await self.async_step_first_sync()
 
@@ -154,8 +174,17 @@ class SamsungHealthConfigFlow(ConfigFlow, domain=DOMAIN):
         return SamsungHealthOptionsFlow()
 
     async def async_step_reauth(self, entry_data: Mapping[str, Any]) -> ConfigFlowResult:
-        self._storage_key = entry_data[CONF_STORAGE_KEY]
+        # Sign in into a staging directory next to the entry's: the account is only
+        # known after the login, and a different account must not replace this one.
+        self._storage_key = f"{REAUTH_STAGING_PREFIX}{uuid.uuid4().hex}"
         return await self.async_step_reauth_confirm()
+
+    @callback
+    def async_remove(self) -> None:
+        """Abandoned flow: drop its staging login (reauth) or unfinished sign-in."""
+        if self._storage_key and self.source == "reauth":
+            staging = entry_paths(self.hass, self._storage_key).directory
+            self.hass.async_add_executor_job(shutil.rmtree, staging, True)
 
     async def async_step_reauth_confirm(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         if user_input is None:

@@ -1,5 +1,5 @@
 """StatisticsWriter against a real (test) recorder: history is written once."""
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 
 from homeassistant.components.recorder import get_instance
 from homeassistant.components.recorder.models import StatisticData, StatisticMeanType
@@ -9,8 +9,10 @@ from homeassistant.components.recorder.statistics import (
     statistics_during_period,
 )
 from homeassistant.helpers import entity_registry as er
+from homeassistant.setup import async_setup_component
 from pytest_homeassistant_custom_component.components.recorder.common import (
     async_wait_recording_done,
+    do_adhoc_statistics,
 )
 
 from custom_components.ha_samsung_health import parsers
@@ -143,3 +145,49 @@ async def test_statistics_deleted_in_recorder_are_rewritten(hass):
     await async_wait_recording_done(hass)
     assert written == 2  # only steps, which was missing
     assert [r["sum"] for r in await _rows(hass, "steps")] == [1000, 3000]
+
+
+# --------------------------------------------------------------- recorder compile
+HOUR = datetime(2026, 11, 9, 10, 0, tzinfo=UTC)
+
+
+def _weighing_at(moment: datetime, kg: float = 80.0):
+    body = parsers.parse_body([weight(moment, kg=kg, bmr=1700)])
+    return build_series(SamsungHealthData(body=body), TODAY, 1.0)
+
+
+async def test_import_never_collides_with_the_recorders_hourly_compile(hass, freezer):
+    """Importing into an hour the recorder hasn't compiled yet made its compile fail,
+    dropping that hour's statistics for EVERY entity (seen live 2026-11-09)."""
+    await async_setup_component(hass, "sensor", {})
+    other = "sensor.other_temperature"
+    freezer.move_to(HOUR + timedelta(minutes=5))
+    hass.states.async_set(other, "21.0", {"unit_of_measurement": "°C", "state_class": "measurement"})
+    _weight_entity(hass)
+    await async_wait_recording_done(hass)
+
+    freezer.move_to(HOUR + timedelta(minutes=30))  # weighed 10:10, polled 10:30
+    await StatisticsWriter(hass, "e1").async_write(_weighing_at(HOUR + timedelta(minutes=10)))
+    await async_wait_recording_done(hass)
+
+    freezer.move_to(HOUR + timedelta(hours=1, minutes=1))
+    for minute in range(0, 60, 5):  # the 5-minute runs; the :55 one also compiles the hour
+        do_adhoc_statistics(hass, start=HOUR + timedelta(minutes=minute))
+    await async_wait_recording_done(hass)
+    assert await _means(hass, other) == [21.0]
+
+
+async def test_rows_for_uncompiled_hours_are_written_by_a_later_poll(hass, freezer):
+    entity_id = _weight_entity(hass)
+    writer = StatisticsWriter(hass, "e1")
+    series = _weighing_at(HOUR + timedelta(minutes=10))
+
+    freezer.move_to(HOUR + timedelta(minutes=30))
+    await writer.async_write(series)
+    await async_wait_recording_done(hass)
+    assert await _means(hass, entity_id) == []  # 10:00 not compiled yet: held back
+
+    freezer.move_to(HOUR + timedelta(hours=1, minutes=20))
+    assert await writer.async_write(series) == 1
+    await async_wait_recording_done(hass)
+    assert await _means(hass, entity_id) == [80.0]
