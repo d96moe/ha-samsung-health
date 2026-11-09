@@ -175,7 +175,7 @@ async def test_setup_creates_sensors(hass, setup):
     assert float(state("sleep_score").state) == 81
     # BMR * 0.5 day + 0.819 * 400 + 4 * 0.5
     assert float(state("total_calories_estimated").state) == pytest.approx(1700 * 0.5 + 0.819 * 400 + 2, abs=1)
-    assert "state_class" not in state("steps").attributes  # daily total: external statistics
+    assert state("steps").attributes["state_class"] == "total"  # daily total, reset at midnight
     assert state("weight").attributes["state_class"] == "measurement"  # history on the entity
     assert float(state("sleep_duration").state) == 7.0  # asleep stages only
     assert float(state("time_in_bed").state) == 7.5

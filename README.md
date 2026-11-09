@@ -52,11 +52,13 @@ into Home Assistant's long-term statistics:
 - **Body, sleep and recovery** values are imported onto the sensors themselves. Open
   *Weight*, for example, in the History panel or its more-info dialog, and you see
   every weighing back to the first one.
-- **Daily totals** (steps, active, total and exercise calories) are separate
+- **Daily totals** (steps, active, total and exercise calories, active time,
+  distance): the *today* sensors are daily totals that start over at local midnight
+  (`state_class: total`), like a "rain today" sensor. Home Assistant keeps their
+  statistics from the day you install the integration, on the sensors themselves.
+  The history from before that, and days your phone syncs late, are in separate
   statistics: `ha_samsung_health:steps`, `ha_samsung_health:active_calories`,
-  `ha_samsung_health:total_calories` and `ha_samsung_health:exercise_calories`. Their
-  sensors restart from zero every midnight, so these totals can't share the sensor's
-  own statistics without breaking them when your phone syncs a past day late. Show
+  `ha_samsung_health:total_calories` and `ha_samsung_health:exercise_calories`. Show
   them as daily bars with a Statistics Graph card:
 
   ```yaml

@@ -260,6 +260,12 @@ class SamsungHealthSensor(CoordinatorEntity[SamsungHealthCoordinator], RestoreSe
         if description.key in ENTITY_KEYS:
             # History is imported onto this entity's statistic (statistics.py).
             self._attr_state_class = SensorStateClass.MEASUREMENT
+        elif description.attrs_fn is _today_attr:
+            # A daily total that starts over at midnight, like a "rain today" sensor:
+            # the recorder keeps its statistics from now on. Nothing is imported onto
+            # it; the full history lives in the ha_samsung_health:<key> statistic.
+            self._attr_state_class = SensorStateClass.TOTAL
+        self._daily_total = description.key not in ENTITY_KEYS and description.attrs_fn is _today_attr
         self._attr_unique_id = f"{coordinator.config_entry.entry_id}_{description.key}"
         self._attr_device_info = device_info(coordinator.config_entry)
         self._restored_value: Any = None
@@ -283,6 +289,12 @@ class SamsungHealthSensor(CoordinatorEntity[SamsungHealthCoordinator], RestoreSe
             return  # "today" values from an earlier day would be wrong
         self._restored_value = last_data.native_value
         self._restored_attrs = attrs or None
+
+    @property
+    def last_reset(self) -> datetime | None:
+        if self._daily_total:
+            return dt_util.start_of_local_day()
+        return None
 
     @callback
     def _async_new_day(self, _now: datetime) -> None:

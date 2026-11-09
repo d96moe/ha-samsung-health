@@ -144,3 +144,18 @@ def test_bmr_by_day_matches_bmr_for_day():
     days = [date(2025, 12, 30) + timedelta(days=i) for i in range(40)]
     assert parsers.bmr_by_day(body, days) == {d: parsers.bmr_for_day(body, d) for d in days}
     assert parsers.bmr_by_day([], days) == dict.fromkeys(days)
+
+
+async def test_daily_total_sensors_get_their_own_statistics(hass, setup):
+    """Like a 'rain today' sensor: state_class total, reset at local midnight."""
+    entry, _ = setup
+    await _load(hass, entry)
+    midnight = datetime(2026, 11, 5, 23, 0, tzinfo=UTC)  # 2026-11-06 00:00 in Stockholm
+    for key in ("steps", "active_calories", "total_calories_estimated", "exercise_calories", "active_time",
+                "distance"):
+        attrs = hass.states.get(f"sensor.samsung_health_{key}").attributes
+        assert attrs["state_class"] == "total", key
+        assert datetime.fromisoformat(attrs["last_reset"]) == midnight, key
+    # measurements keep theirs; values without statistics stay without
+    assert hass.states.get("sensor.samsung_health_weight").attributes["state_class"] == "measurement"
+    assert "state_class" not in hass.states.get("sensor.samsung_health_last_cloud_sync").attributes
