@@ -47,6 +47,9 @@ DOCS = {
 }
 
 
+MISSING = object()  # FakeApi.docs value: the cloud answers 404 for that type
+
+
 class FakeApi:
     error: Exception | None = None
     polls = 0
@@ -67,7 +70,10 @@ class FakeApi:
     def fetch(self, manifest, revision):
         if FakeApi.gate is not None:
             FakeApi.gate.wait(5)
-        return FetchResult(manifest, revision, FakeApi.docs[manifest], 0.1)
+        docs = FakeApi.docs[manifest]
+        if docs is MISSING:  # Samsung answered 404 for this type
+            return FetchResult(manifest, revision, [], 0.1, missing=True)
+        return FetchResult(manifest, revision, docs, 0.1)
 
     def close(self):
         self.closed = True
@@ -91,7 +97,10 @@ async def setup(hass, freezer):
 
     with patch("custom_components.ha_samsung_health.coordinator.SamsungHealthApi", FakeApi), \
          patch("custom_components.ha_samsung_health.statistics.async_add_external_statistics", side_effect=record), \
-         patch("custom_components.ha_samsung_health.statistics.async_import_statistics", side_effect=record):
+         patch("custom_components.ha_samsung_health.statistics.async_import_statistics", side_effect=record), \
+         patch("custom_components.ha_samsung_health.statistics.StatisticsWriter._keys_missing_in_recorder",
+               return_value=[]):  # writes are recorded above, so the recorder never has rows;
+        # the "deleted in the recorder" check is tested against a real recorder instead.
         yield entry, written
 
 
@@ -185,12 +194,12 @@ async def test_statistics_written_once_then_only_changes(hass, setup, freezer):
     assert "sensor.samsung_health_sleep_duration" not in ids
     written.clear()
     await entry.runtime_data.async_refresh()
-    await hass.async_block_till_done()
+    await hass.async_block_till_done(wait_background_tasks=True)
     # Same data: nothing rewritten.
     assert written == []
     freezer.move_to(NOW + timedelta(hours=2, minutes=20))  # 12:00 UTC compiled by now
     await entry.runtime_data.async_refresh()
-    await hass.async_block_till_done()
+    await hass.async_block_till_done(wait_background_tasks=True)
     assert "sensor.samsung_health_sleep_duration" in {sid for sid, _ in written}
 
 

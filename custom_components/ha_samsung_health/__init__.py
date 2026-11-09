@@ -37,8 +37,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: SamsungHealthConfigEntry
         if coordinator.data is None:
             return
         now = dt_util.utcnow()
-        series = build_series(coordinator.data, dt_util.as_local(now).date(), day_fraction(now))
         try:
+            # The whole history: build it in the executor, not on the event loop.
+            series = await hass.async_add_executor_job(
+                build_series, coordinator.data, dt_util.as_local(now).date(), day_fraction(now)
+            )
             await writer.async_write(series)
         except Exception:  # never let a statistics problem break polling
             _LOGGER.exception("Writing Samsung Health statistics failed")
@@ -52,6 +55,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: SamsungHealthConfigEntry
     # they must be registered before the first write.
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(coordinator.async_add_listener(_on_update))
+    entry.async_on_unload(coordinator.async_add_listener(coordinator.async_check_exercises))
     entry.async_on_unload(entry.add_update_listener(_async_options_updated))
     # LLM API "Samsung Health": published by Home Assistant's MCP server at
     # /api/mcp/ha_samsung_health, for AI agents that should see health data only.

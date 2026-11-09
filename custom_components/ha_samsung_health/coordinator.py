@@ -8,7 +8,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
@@ -50,6 +50,10 @@ def entry_paths(hass: HomeAssistant, storage_key: str) -> EntryPaths:
 type Stats = dict[str, tuple[int, int, float]]
 
 
+class SyncStopped(Exception):
+    """A download someone was waiting for was cancelled before it finished."""
+
+
 @dataclass(slots=True)
 class Prefetched:
     """A full download made by the config flow, handed to the new entry's first refresh."""
@@ -64,12 +68,21 @@ def prefetched_store(hass: HomeAssistant) -> dict[str, Prefetched]:
     return hass.data.setdefault(f"{DOMAIN}_prefetched", {})
 
 
-def fetch_documents(api: SamsungHealthApi, revisions: dict[str, int], stats: Stats) -> dict[str, list[dict]]:
-    """Download every manifest (blocking). Heals `revisions` in place and fills `stats`."""
+def fetch_documents(
+    api: SamsungHealthApi, revisions: dict[str, int], stats: Stats, had_documents: frozenset[str] = frozenset()
+) -> dict[str, list[dict]]:
+    """Download every manifest (blocking). Heals `revisions` in place and fills `stats`.
+
+    A 404 means "type not available", which is fine for a type that never had data.
+    For one that had documents before it's a glitch: fail the poll rather than
+    rewriting that history (e.g. every day's exercise calories) as empty.
+    """
     api.initialize()
     out = {}
     for manifest, revision in list(revisions.items()):
         result = api.fetch(manifest, revision)
+        if result.missing and manifest in had_documents:
+            raise SamsungHealthTransientError(f"{manifest} answered 'not found' although it had data")
         if result.revision != revision:
             _LOGGER.info("%s: schema revision %s -> %s", manifest, revision, result.revision)
             revisions[manifest] = result.revision
@@ -115,6 +128,7 @@ class SamsungHealthCoordinator(DataUpdateCoordinator[SamsungHealthData]):
         self._revisions = dict(MANIFESTS)
         self._exercise_fingerprint: frozenset[tuple[str, float | None]] = frozenset()
         self._fetch_stats: dict[str, tuple[int, int, float]] = {}
+        self._had_documents: frozenset[str] = frozenset()
 
     @property
     def syncing(self) -> bool:
@@ -147,19 +161,44 @@ class SamsungHealthCoordinator(DataUpdateCoordinator[SamsungHealthData]):
                 return
             self.async_sync_now()
         assert self._sync_task is not None
-        await asyncio.shield(self._sync_task)
+        task = self._sync_task
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            current = asyncio.current_task()
+            if task.cancelled() and not (current and current.cancelling()):
+                # The download was stopped (e.g. the entry unloaded), not the caller.
+                raise SyncStopped from None
+            raise
 
     async def async_shutdown(self) -> None:
         await super().async_shutdown()
-        if self._api is not None:
-            await self.hass.async_add_executor_job(self._api.close)
-            self._api = None
+        # A download may still be running in an executor thread (cancelling its task
+        # doesn't stop the thread): wait for it before closing the client under it.
+        async with self._lock:
+            if self._api is not None:
+                await self.hass.async_add_executor_job(self._api.close)
+                self._api = None
+
+    @callback
+    def async_check_exercises(self) -> None:
+        """Coordinator listener: tell ha-workouts when the workouts changed.
+
+        A listener runs after `data` is published, so a listener of the signal that
+        reads exercise_api right away already sees the new sessions.
+        """
+        if self.data is None:
+            return
+        fingerprint = frozenset((s.source_id, s.calories) for s in self.data.exercises)
+        if fingerprint != self._exercise_fingerprint:
+            self._exercise_fingerprint = fingerprint
+            async_dispatcher_send(self.hass, SIGNAL_EXERCISE_UPDATED)
 
     def _fetch_all(self) -> dict[str, list[dict]]:
         if self._api is None:
             # Import and client creation do blocking I/O; we are in the executor.
             self._api = SamsungHealthApi(self.paths)
-        return fetch_documents(self._api, self._revisions, self._fetch_stats)
+        return fetch_documents(self._api, self._revisions, self._fetch_stats, self._had_documents)
 
     async def _async_update_data(self) -> SamsungHealthData:
         self._fetch_stats = {}
@@ -180,19 +219,21 @@ class SamsungHealthCoordinator(DataUpdateCoordinator[SamsungHealthData]):
             except SamsungHealthTransientError as exc:
                 raise UpdateFailed(str(exc)) from exc
 
-        exercises = parsers.parse_exercises(docs[MANIFEST_EXERCISE])
-        newest = parsers.newest_update_ms(*docs.values())
-        data = SamsungHealthData(
-            days=parsers.parse_daily_activity(docs[MANIFEST_ACTIVITY], docs[MANIFEST_STEPS], exercises),
-            body=parsers.parse_body(docs[MANIFEST_WEIGHT]),
-            sleep=parsers.parse_sleep(docs[MANIFEST_SLEEP], docs[MANIFEST_SLEEP_STAGE]),
-            recovery=parsers.parse_recovery(docs[MANIFEST_VITALITY]),
-            exercises=exercises,
-            last_cloud_update=dt_util.utc_from_timestamp(newest / 1000) if newest else None,
-            fetch_stats=self._fetch_stats,
-        )
-        fingerprint = frozenset((s.source_id, s.calories) for s in exercises)
-        if fingerprint != self._exercise_fingerprint:
-            self._exercise_fingerprint = fingerprint
-            async_dispatcher_send(self.hass, SIGNAL_EXERCISE_UPDATED)
-        return data
+        self._had_documents = frozenset(m for m, d in docs.items() if d)
+        # Tens of thousands of records: parse in the executor, not on the event loop.
+        return await self.hass.async_add_executor_job(parse_documents, docs, self._fetch_stats)
+
+
+def parse_documents(docs: dict[str, list[dict]], fetch_stats: Stats) -> SamsungHealthData:
+    """Raw documents -> SamsungHealthData (blocking, pure)."""
+    exercises = parsers.parse_exercises(docs[MANIFEST_EXERCISE])
+    newest = parsers.newest_update_ms(*docs.values())
+    return SamsungHealthData(
+        days=parsers.parse_daily_activity(docs[MANIFEST_ACTIVITY], docs[MANIFEST_STEPS], exercises),
+        body=parsers.parse_body(docs[MANIFEST_WEIGHT]),
+        sleep=parsers.parse_sleep(docs[MANIFEST_SLEEP], docs[MANIFEST_SLEEP_STAGE]),
+        recovery=parsers.parse_recovery(docs[MANIFEST_VITALITY]),
+        exercises=exercises,
+        last_cloud_update=dt_util.utc_from_timestamp(newest / 1000) if newest else None,
+        fetch_stats=fetch_stats,
+    )

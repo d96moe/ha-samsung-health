@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from homeassistant.components.sensor import (
@@ -24,9 +24,10 @@ from homeassistant.const import (
     UnitOfMass,
     UnitOfTime,
 )
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
+from homeassistant.helpers.event import async_track_time_change
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
@@ -39,9 +40,15 @@ KCAL = "kcal"
 
 
 def day_fraction(now: datetime) -> float:
-    local = dt_util.as_local(now)
-    midnight = local.replace(hour=0, minute=0, second=0, microsecond=0)
-    return (local - midnight).total_seconds() / 86400
+    """Share of today's local day that has passed (a DST day has 23 or 25 hours).
+
+    In UTC: subtracting datetimes that share a tzinfo is wall-clock arithmetic,
+    which would make every day 24 hours long.
+    """
+    local_day = dt_util.as_local(now).date()
+    start = dt_util.as_utc(dt_util.start_of_local_day(local_day))
+    end = dt_util.as_utc(dt_util.start_of_local_day(local_day + timedelta(days=1)))
+    return (dt_util.as_utc(now) - start) / (end - start)
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -127,7 +134,7 @@ SENSORS: tuple[SamsungSensorDescription, ...] = (
     SamsungSensorDescription(
         key="exercise_calories", translation_key="exercise_calories", native_unit_of_measurement=KCAL,
         icon="mdi:dumbbell", suggested_display_precision=0,
-        value_fn=lambda d, n: (a.exercise_kcal if (a := _today(d, n)) else 0.0), attrs_fn=_today_attr,
+        value_fn=lambda d, n: (a.exercise_kcal if (a := _today(d, n)) else None), attrs_fn=_today_attr,
     ),
     SamsungSensorDescription(
         key="active_time", translation_key="active_time", device_class=SensorDeviceClass.DURATION,
@@ -260,6 +267,11 @@ class SamsungHealthSensor(CoordinatorEntity[SamsungHealthCoordinator], RestoreSe
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
+        if self.entity_description.attrs_fn is _today_attr:
+            # "Today" values start over at local midnight, not at the next poll.
+            self.async_on_remove(
+                async_track_time_change(self.hass, self._async_new_day, hour=0, minute=0, second=0)
+            )
         if self.coordinator.data is not None:
             return
         last_state = await self.async_get_last_state()
@@ -271,6 +283,11 @@ class SamsungHealthSensor(CoordinatorEntity[SamsungHealthCoordinator], RestoreSe
             return  # "today" values from an earlier day would be wrong
         self._restored_value = last_data.native_value
         self._restored_attrs = attrs or None
+
+    @callback
+    def _async_new_day(self, _now: datetime) -> None:
+        self._restored_value = self._restored_attrs = None  # yesterday's, if restored
+        self.async_write_ha_state()
 
     @property
     def native_value(self) -> Any:

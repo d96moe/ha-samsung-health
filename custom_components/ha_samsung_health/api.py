@@ -99,6 +99,8 @@ class FetchResult:
     revision: int
     documents: list[dict[str, Any]]
     seconds: float
+    #: The cloud answered 404 ("content not found"): the type isn't available.
+    missing: bool = False
 
 
 class SamsungHealthApi:
@@ -183,7 +185,7 @@ class SamsungHealthApi:
                     continue
                 if status == 404:
                     # "Content not found for content name": type not available.
-                    return FetchResult(manifest_id, revision, [], time.monotonic() - started)
+                    return FetchResult(manifest_id, revision, [], time.monotonic() - started, missing=True)
                 if status == 400 and not healed_revision:
                     healed_revision = True
                     try:

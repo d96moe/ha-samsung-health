@@ -111,7 +111,14 @@ def statistic_id(key: str) -> str:
 
 
 def day_bucket(day: date) -> datetime:
-    return datetime.combine(day, time(12), tzinfo=UTC)
+    """Row start for a daily value: 12:00 UTC, which is on the same local day from
+    UTC-11 to UTC+11 (so existing rows never move). Further east or west it would
+    land on another local day; there, local noon (on the hour) is used instead."""
+    noon_utc = datetime.combine(day, time(12), tzinfo=UTC)
+    if dt_util.as_local(noon_utc).date() == day:
+        return noon_utc
+    local_noon = datetime.combine(day, time(12), tzinfo=dt_util.get_default_time_zone())
+    return hour_bucket(local_noon)
 
 
 def hour_bucket(moment: datetime) -> datetime:
@@ -126,6 +133,7 @@ def build_series(data, today: date, today_fraction: float) -> Series:
         if value is not None:
             series[key].append((start, float(value)))
 
+    bmr = parsers.bmr_by_day(data.body, data.days)  # one pass, not one scan per day
     for day in sorted(data.days):
         a = data.days[day]
         bucket = day_bucket(day)
@@ -134,7 +142,7 @@ def build_series(data, today: date, today_fraction: float) -> Series:
         add("exercise_calories", bucket, a.exercise_kcal)
         fraction = today_fraction if day == today else 1.0
         add("total_calories", bucket,
-            parsers.estimate_total_kcal(a.active_kcal, parsers.bmr_for_day(data.body, day), fraction))
+            parsers.estimate_total_kcal(a.active_kcal, bmr[day], fraction))
 
     body_fields: dict[str, Callable[[parsers.BodyMeasurement], float | None]] = {
         "weight": lambda m: m.weight,
@@ -193,6 +201,16 @@ def month_fingerprints(rows: list[StatisticData]) -> dict[str, str]:
     }
 
 
+def month_buckets(rows: list[StatisticData]) -> dict[str, list[int]]:
+    """Calendar month (UTC) -> hours since that month's start of its rows (compact)."""
+    out: dict[str, list[int]] = {}
+    for row in rows:
+        start = row["start"]
+        month_start = start.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        out.setdefault(_month(row), []).append(int((start - month_start).total_seconds() // 3600))
+    return out
+
+
 def first_changed_month(old: dict[str, str] | None, new: dict[str, str]) -> str | None:
     """First month whose rows differ from what was written, or None if nothing changed.
 
@@ -239,7 +257,7 @@ def unit_class(spec: StatSpec) -> str | None:
     return None
 
 
-def metadata(spec: StatSpec, entity_id: str | None = None) -> StatisticMetaData:
+def metadata(spec: StatSpec, entity_id: str | None = None, unit: str | None = None) -> StatisticMetaData:
     """External metadata for daily totals; the entity's own for measurements."""
     if spec.cumulative:
         return StatisticMetaData(
@@ -259,7 +277,7 @@ def metadata(spec: StatSpec, entity_id: str | None = None) -> StatisticMetaData:
         source=RECORDER_DOMAIN,
         statistic_id=entity_id,
         unit_class=unit_class(spec),
-        unit_of_measurement=spec.unit,
+        unit_of_measurement=unit or spec.unit,
     )
 
 
@@ -271,6 +289,9 @@ class StatisticsWriter:
         self.entry_id = entry_id
         self._store: Store[dict] = Store(hass, STORAGE_VERSION, store_key(entry_id))
         self._fingerprints: dict[str, dict[str, str]] | None = None
+        #: key -> month -> hours since the month's start of the rows written there
+        self._buckets: dict[str, dict[str, list[int]]] = {}
+        self._unit_warned: set[str] = set()
 
     def _entity_id(self, key: str) -> str | None:
         return er.async_get(self.hass).async_get_entity_id("sensor", DOMAIN, f"{self.entry_id}_{key}")
@@ -292,6 +313,7 @@ class StatisticsWriter:
         fingerprints: dict[str, dict[str, str]] = {
             k: v for k, v in stored.get("fingerprints", {}).items() if k in SPECS
         }
+        self._buckets = {k: v for k, v in stored.get("buckets", {}).items() if k in fingerprints}
         if stored and stored.get("layout", 1) < LAYOUT:
             # v0.1.x wrote measurements as external statistics. They now live on the
             # sensor entities: drop the old copies and write the history there.
@@ -299,61 +321,99 @@ class StatisticsWriter:
             get_instance(self.hass).async_clear_statistics([statistic_id(k) for k in sorted(ENTITY_KEYS)])
             for key in ENTITY_KEYS:
                 fingerprints.pop(key, None)
-        targets = {k: t for k in fingerprints if (t := self._target(k))}
-        if targets:
-            missing = await get_instance(self.hass).async_add_executor_job(
-                self._keys_missing_in_recorder, targets
-            )
-            for key in missing:
-                _LOGGER.info("Statistics for %s missing in the recorder; rewriting in full", key)
-                fingerprints.pop(key)
+                self._buckets.pop(key, None)
         return fingerprints
 
-    def _unit_matches(self, spec: StatSpec, entity_id: str) -> bool:
+    async def _async_forget_keys_missing_in_recorder(self) -> None:
+        """Statistics deleted in the recorder (or a replaced database): write them in full."""
+        assert self._fingerprints is not None
+        targets = {k: t for k, f in self._fingerprints.items() if f and (t := self._target(k))}
+        if not targets:
+            return
+        missing = await get_instance(self.hass).async_add_executor_job(self._keys_missing_in_recorder, targets)
+        for key in missing:
+            _LOGGER.info("Statistics for %s missing in the recorder; rewriting in full", key)
+            self._fingerprints.pop(key)
+            self._buckets.pop(key, None)
+
+    def _entity_unit(self, spec: StatSpec, entity_id: str) -> tuple[str | None, Callable[[float], float] | None]:
+        """The unit the entity's statistics are in, and how to convert to it (None: skip)."""
         state = self.hass.states.get(entity_id)
         unit = state.attributes.get("unit_of_measurement") if state else spec.unit
-        if unit != spec.unit:
-            # The user picked another display unit; importing in the native unit would
-            # make the recorder flag a unit change. Leave that entity's history alone.
+        if unit == spec.unit:
+            return unit, lambda value: value
+        converter = (UNIT_CONVERTERS.get(spec.device_class) if spec.device_class else None) \
+            or STATISTIC_UNIT_TO_UNIT_CONVERTER.get(spec.unit)
+        if converter and spec.unit in converter.VALID_UNITS and unit in converter.VALID_UNITS:
+            # The user picked another display unit (e.g. lb): import in that unit.
+            return unit, converter.converter_factory(spec.unit, unit)
+        if entity_id not in self._unit_warned:
+            self._unit_warned.add(entity_id)
             _LOGGER.warning(
-                "Not importing history into %s: its unit is %s, history is in %s", entity_id, unit, spec.unit
+                "Not importing history into %s: its unit %s can't be converted from %s", entity_id, unit, spec.unit
             )
-            return False
-        return True
+        return None, None
 
     async def async_write(self, series: Series) -> int:
         # Save after the first load even if nothing is written, to record the layout.
         first_load = self._fingerprints is None
         if self._fingerprints is None:
             self._fingerprints = await self._async_load()
+        await self._async_forget_keys_missing_in_recorder()
         compiled_before = compiled_hours_end(dt_util.utcnow())
-        total = 0
+        total, save = 0, first_load
         for key, values in series.items():
             spec = SPECS[key]
+            entity_id = unit = None
             if not spec.cumulative:
+                if (entity_id := self._entity_id(key)) is None:
+                    continue
+                unit, convert = self._entity_unit(spec, entity_id)
+                if convert is None:
+                    continue
                 # Rows on the sensor entity's own statistic must not reach an hour the
                 # recorder hasn't compiled yet: its hourly compile inserts (no upsert),
                 # so it would hit our row, fail and roll back that hour for EVERY entity.
                 # Held-back rows aren't fingerprinted, so a later poll writes them.
-                values = [(start, value) for start, value in values if start < compiled_before]
+                values = [(start, convert(value)) for start, value in values if start < compiled_before]
             rows = to_rows(spec, values)
             fingerprints = month_fingerprints(rows)
+            buckets = month_buckets(rows)
+            old_buckets = self._buckets.get(key)
+            if old_buckets is None and key in self._fingerprints:
+                # Stored before buckets were kept (v0.4.1 and older): start keeping them.
+                self._buckets[key] = buckets
+                save = True
             month = first_changed_month(self._fingerprints.get(key), fingerprints)
-            if month is None:
+            removed = old_buckets is not None and any(
+                set(hours) - set(buckets.get(m, ())) for m, hours in old_buckets.items()
+            )
+            if month is None and not removed:
                 continue
-            changed = [row for row in rows if _month(row) >= month]
-            if spec.cumulative:
-                async_add_external_statistics(self.hass, metadata(spec), changed)
+            target = statistic_id(key) if spec.cumulative else entity_id
+            if removed:
+                # A record was deleted in Samsung Health. Rows can't be deleted one by
+                # one, so clear this statistic and write it again in full.
+                _LOGGER.info("Rows removed from %s; rewriting its statistics in full", key)
+                get_instance(self.hass).async_clear_statistics([target])
+                changed = rows
             else:
-                if (entity_id := self._entity_id(key)) is None or not self._unit_matches(spec, entity_id):
-                    continue
-                async_import_statistics(self.hass, metadata(spec, entity_id), changed)
+                changed = [row for row in rows if _month(row) >= month]
+            if changed:
+                if spec.cumulative:
+                    async_add_external_statistics(self.hass, metadata(spec), changed)
+                else:
+                    async_import_statistics(self.hass, metadata(spec, entity_id, unit), changed)
             self._fingerprints[key] = fingerprints
+            self._buckets[key] = buckets
             total += len(changed)
-        if total or first_load:
+            save = True
+        if save:
             # Only remember what was written once the recorder has committed it.
             await get_instance(self.hass).async_block_till_done()
-            await self._store.async_save({"layout": LAYOUT, "fingerprints": self._fingerprints})
+            await self._store.async_save(
+                {"layout": LAYOUT, "fingerprints": self._fingerprints, "buckets": self._buckets}
+            )
             _LOGGER.debug("Wrote %d statistic rows", total)
         return total
 

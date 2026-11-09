@@ -308,6 +308,22 @@ def bmr_for_day(body: list[BodyMeasurement], day: date) -> float | None:
     return statistics.median(values[-BMR_MEDIAN_WINDOW:])
 
 
+def bmr_by_day(body: list[BodyMeasurement], days: Iterable[date]) -> dict[date, float | None]:
+    """bmr_for_day for many days in one pass over the weighings (body is sorted)."""
+    values = [(m.measured_at.date(), m.bmr) for m in body if m.bmr]
+    first = [values[0][1]] if values else []
+    seen: list[float] = []
+    out: dict[date, float | None] = {}
+    i = 0
+    for day in sorted(set(days)):
+        while i < len(values) and values[i][0] <= day:
+            seen.append(values[i][1])
+            i += 1
+        window = seen[-BMR_MEDIAN_WINDOW:] or first
+        out[day] = statistics.median(window) if window else None
+    return out
+
+
 def estimate_total_kcal(active_kcal: float | None, bmr: float | None, day_fraction: float = 1.0) -> float | None:
     """Samsung's total burn is not in the cloud data; this is an empirical fit."""
     if active_kcal is None or bmr is None:

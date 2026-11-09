@@ -75,6 +75,7 @@ class SamsungHealthConfigFlow(ConfigFlow, domain=DOMAIN):
         self._login_url: str | None = None
         self._sync_task: asyncio.Task[None] | None = None
         self._scan_interval = DEFAULT_SCAN_INTERVAL
+        self._entry_created = False
 
     async def _async_new_login_url(self) -> None:
         paths = entry_paths(self.hass, self._storage_key)
@@ -159,9 +160,13 @@ class SamsungHealthConfigFlow(ConfigFlow, domain=DOMAIN):
             # Not fatal: the entry's own first refresh retries it.
             _LOGGER.warning("First Samsung Health download failed, will retry after setup: %s", exc)
             return
+        except Exception:  # anything else: log it here, never leave it in the task
+            _LOGGER.exception("First Samsung Health download failed, will retry after setup")
+            return
         prefetched_store(self.hass)[self._storage_key] = prefetched
 
     async def async_step_finish(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        self._entry_created = True
         return self.async_create_entry(
             title="Samsung Health",
             data={CONF_STORAGE_KEY: self._storage_key},
@@ -181,10 +186,14 @@ class SamsungHealthConfigFlow(ConfigFlow, domain=DOMAIN):
 
     @callback
     def async_remove(self) -> None:
-        """Abandoned flow: drop its staging login (reauth) or unfinished sign-in."""
-        if self._storage_key and self.source == "reauth":
-            staging = entry_paths(self.hass, self._storage_key).directory
-            self.hass.async_add_executor_job(shutil.rmtree, staging, True)
+        """Flow closed: drop a staged reauth login or an unfinished sign-in.
+
+        Also called after a successful setup, whose directory the new entry uses: kept.
+        A successful reauth has already moved its staging directory into place.
+        """
+        if self._storage_key and not self._entry_created:
+            directory = entry_paths(self.hass, self._storage_key).directory
+            self.hass.async_add_executor_job(shutil.rmtree, directory, True)
 
     async def async_step_reauth_confirm(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         if user_input is None:

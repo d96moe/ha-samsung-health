@@ -191,11 +191,13 @@ paste the remote URL, and sign in to Home Assistant in the window that opens.
 - **Never holds up Home Assistant's startup.** The download runs in the background.
   Until the first one after a restart finishes, the sensors show their values from
   before the restart. "Today" values (steps, calories) are only restored if they are
-  from today.
+  from today, and they start over at local midnight: until the phone has synced the
+  new day, they are *unknown* rather than showing yesterday's total or 0.
 - **Temporary Samsung errors.** Samsung's server sometimes answers with an error
   (HTTP 500). The integration retries that request twice, after 2 and 5 seconds,
   before giving up. If it still fails, the poll is retried later and the sensors
-  keep their last values.
+  keep their last values. A data type that had data but suddenly answers "not
+  found" also fails the poll, instead of rewriting that history as empty.
 - **Full download on every poll.** Samsung's server ignores date filters, so each poll
   downloads your full history for seven data types: about 85,000 records (most of them
   sleep stages) in read-only requests, taking about 20 seconds for ten years of data. Data is
@@ -209,12 +211,23 @@ paste the remote URL, and sign in to Home Assistant in the window that opens.
   regular statistics API, never direct database access.
   - If the statistics are deleted from the recorder, they are written again in full on
     the next poll.
+  - Something deleted in Samsung Health (a guest's weighing, a day) disappears from
+    the statistics too: that statistic is cleared and written again in full. For a
+    body, sleep or recovery sensor this also clears the hourly values the recorder
+    compiled from the sensor itself between measurements; the measured values are
+    all written back.
   - Body, sleep and recovery values are only written into hours the recorder has
     already compiled (about 15 minutes after the hour ends). Writing into a newer
     hour would make the recorder's own hourly compile fail for every entity in
-    Home Assistant. So a new weighing, or last night's sleep (stored at 12:00 UTC of
+    Home Assistant. So a new weighing, or last night's sleep (stored at about noon of
     the wake-up day), appears in the History graph a poll or two later. The sensors
     themselves show it right away.
+  - If you display a sensor in another unit (e.g. pounds), its history is converted
+    to that unit.
+  - Daily values sit at 12:00 UTC of their day, which is on the same local day from
+    UTC−11 to UTC+11. Further east or west (e.g. New Zealand), local noon is used.
+- **Light on Home Assistant.** Parsing the download and building the history runs in
+  a worker thread, not on Home Assistant's event loop.
 - **Freshness.** Data is only as fresh as the phone's sync to Samsung Cloud.
 - **Library workarounds.** Two problems in samsung-re-health 0.7.2 are worked around
   without modifying it:

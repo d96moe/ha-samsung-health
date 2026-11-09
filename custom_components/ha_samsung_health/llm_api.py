@@ -21,7 +21,7 @@ from homeassistant.util import dt as dt_util
 
 from . import parsers
 from .const import DOMAIN
-from .coordinator import SamsungHealthConfigEntry, SamsungHealthData
+from .coordinator import SamsungHealthConfigEntry, SamsungHealthData, SyncStopped
 from .sensor import day_fraction
 from .statistics import SPECS, build_series
 
@@ -180,8 +180,8 @@ def daily_values(data: SamsungHealthData, metric: str, today: date, now: datetim
     if metric in BODY_KEYS:
         get = _BODY_FIELDS[metric]
         return [(m.measured_at.date(), v) for m in data.body if (v := get(m)) is not None]
-    # Daily series sit at 12:00 UTC of their own day, so .date() is that day.
-    return [(start.date(), v) for start, v in build_series(data, today, day_fraction(now))[metric]]
+    # Daily series sit at about noon of their own local day (statistics.day_bucket).
+    return [(dt_util.as_local(start).date(), v) for start, v in build_series(data, today, day_fraction(now))[metric]]
 
 
 def period_start(day: date, period: str) -> date:
@@ -292,7 +292,8 @@ class HistoryTool(_Tool):
         if start > end:
             raise ToolError("start is after end")
         spec = SPECS[metric]
-        rows = history(daily_values(data, metric, today, now), spec.cumulative, start, end, period)
+        values = await self.entry.runtime_data.hass.async_add_executor_job(daily_values, data, metric, today, now)
+        rows = history(values, spec.cumulative, start, end, period)
         truncated = len(rows) > MAX_HISTORY_ROWS
         result = {
             "metric": metric,
@@ -359,6 +360,9 @@ class SyncNowTool(_Tool):
             await asyncio.wait_for(coordinator.async_sync_and_wait(), SYNC_TIMEOUT)
         except TimeoutError as exc:
             raise ToolError("The download is still running; try again in a minute.") from exc
+        except SyncStopped as exc:
+            raise ToolError("The download was stopped before it finished (Home Assistant is "
+                            "reloading the integration); try again shortly.") from exc
         if not coordinator.last_update_success:
             raise ToolError("The download from Samsung Cloud failed; the previous data is still available.")
         return {"synced": True, "data_freshness": freshness(self.entry, dt_util.utcnow())}

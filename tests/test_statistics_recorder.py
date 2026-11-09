@@ -125,13 +125,6 @@ async def test_old_external_measurements_are_moved_to_the_entity(hass, hass_stor
     assert hass_storage[store_key("e1")]["data"]["layout"] == 2
 
 
-async def test_entity_with_other_display_unit_is_left_alone(hass):
-    entity_id = _weight_entity(hass, unit="lb")
-    assert await StatisticsWriter(hass, "e1").async_write(_weight_series(90.0)) == 0
-    await async_wait_recording_done(hass)
-    assert await _means(hass, entity_id) == []
-
-
 async def test_statistics_deleted_in_recorder_are_rewritten(hass):
     series = _series([(10, 1), (10, 2)])
     await StatisticsWriter(hass, "e1").async_write(series)
@@ -191,3 +184,49 @@ async def test_rows_for_uncompiled_hours_are_written_by_a_later_poll(hass, freez
     assert await writer.async_write(series) == 1
     await async_wait_recording_done(hass)
     assert await _means(hass, entity_id) == [80.0]
+
+
+async def test_deleted_weighing_disappears_from_the_history(hass):
+    """A weighing deleted in Samsung Health (a guest on the scale) must not stay."""
+    entity_id = _weight_entity(hass)
+    writer = StatisticsWriter(hass, "e1")
+    both = parsers.parse_body([weight(datetime(2016, 3, 1, 6, 30, tzinfo=UTC), kg=90.0, bmr=1700),
+                               weight(datetime(2016, 3, 5, 6, 30, tzinfo=UTC), kg=55.0, bmr=1200)])
+    await writer.async_write(build_series(SamsungHealthData(body=both), TODAY, 1.0))
+    await async_wait_recording_done(hass)
+    assert await _means(hass, entity_id) == [90.0, 55.0]
+    await writer.async_write(build_series(SamsungHealthData(body=both[:1]), TODAY, 1.0))
+    await async_wait_recording_done(hass)
+    assert await _means(hass, entity_id) == [90.0]
+
+
+async def test_deleted_day_disappears_from_the_daily_totals(hass):
+    writer = StatisticsWriter(hass, "e1")
+    await writer.async_write(_series([(10, 1), (10, 2), (10, 3)]))
+    await async_wait_recording_done(hass)
+    await writer.async_write(_series([(10, 1), (10, 3)]))  # 10-02 deleted
+    await async_wait_recording_done(hass)
+    rows = await _rows(hass, "steps")
+    assert [r["start"] for r in rows] == [datetime(2026, 10, d, 12, tzinfo=UTC).timestamp() for d in (1, 3)]
+    assert [r["sum"] for r in rows] == [1000, 3000]
+
+
+async def test_statistics_deleted_in_recorder_are_rewritten_on_the_next_poll(hass):
+    writer = StatisticsWriter(hass, "e1")  # the same writer: no restart in between
+    series = _series([(10, 1), (10, 2)])
+    await writer.async_write(series)
+    await async_wait_recording_done(hass)
+    get_instance(hass).async_clear_statistics([statistic_id("steps")])
+    await async_wait_recording_done(hass)
+    await writer.async_write(series)
+    await async_wait_recording_done(hass)
+    assert [r["sum"] for r in await _rows(hass, "steps")] == [1000, 3000]
+
+
+async def test_entity_with_another_display_unit_gets_converted_history(hass):
+    entity_id = _weight_entity(hass, unit="lb")
+    writer = StatisticsWriter(hass, "e1")
+    assert await writer.async_write(_weight_series(90.0)) == 1
+    await async_wait_recording_done(hass)
+    [mean] = await _means(hass, entity_id)
+    assert abs(mean - 90.0 / 0.45359237) < 1e-6

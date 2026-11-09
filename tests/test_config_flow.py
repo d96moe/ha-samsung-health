@@ -25,10 +25,10 @@ def no_setup():
 PREFETCHED = Prefetched({"m": []}, {"m": 1}, {})
 
 
-async def _sign_in(hass, history, form=None):
+async def _sign_in(hass, history, form=None, complete=None):
     """Run the flow through sign-in and the history download; returns the final result."""
     with patch(f"{FLOW}.start_login", return_value="https://account.samsung.com/login") as start, \
-         patch(f"{FLOW}.complete_login", return_value="user-1"), \
+         patch(f"{FLOW}.complete_login", **(complete or {"return_value": "user-1"})), \
          patch(f"{FLOW}.fetch_history", **history) as fetch:
         result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
         assert result["type"] is FlowResultType.FORM
@@ -150,4 +150,41 @@ async def test_reauth(hass, user_id, reason):
     assert complete.call_args.args[0].directory != entry_dir
     expected = "new login of user-1" if reason == "reauth_successful" else "old login of user-1"
     assert (entry_dir / "master.json").read_text() == expected
-    assert [p.name for p in entry_dir.parent.iterdir()] == ["k" * 32]  # no staging left behind
+    leftovers = [p.name for p in entry_dir.parent.iterdir()
+                 if p.name.startswith("reauth-") or p.name.endswith(".old")]
+    assert leftovers == []  # no staging left behind
+
+
+async def test_abandoned_sign_in_leaves_no_files(hass):
+    created = []
+
+    def start(paths, country, locale):
+        paths.directory.mkdir(parents=True, exist_ok=True)
+        (paths.directory / "pending.json").write_text("{}")
+        created.append(paths.directory)
+        return "https://x/1"
+
+    with patch(f"{FLOW}.start_login", side_effect=start):
+        result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
+    assert created[0].exists()
+    hass.config_entries.flow.async_abort(result["flow_id"])
+    await hass.async_block_till_done()
+    assert not created[0].exists()
+
+
+async def test_unexpected_error_in_first_download_still_creates_entry(hass, caplog):
+    result = await _sign_in(hass, {"side_effect": RuntimeError("library bug")})
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert "First Samsung Health download failed" in caplog.text  # logged, not an unretrieved task error
+
+
+async def test_finished_sign_in_keeps_its_login(hass):
+    def login(paths, url):
+        paths.directory.mkdir(parents=True, exist_ok=True)
+        (paths.directory / "master.json").write_text("{}")
+        return "user-1"
+
+    result = await _sign_in(hass, {"return_value": PREFETCHED}, complete={"side_effect": login})
+    await hass.async_block_till_done()
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert (entry_paths(hass, result["data"][CONF_STORAGE_KEY]).directory / "master.json").exists()
