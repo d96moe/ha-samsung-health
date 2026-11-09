@@ -17,6 +17,7 @@ from homeassistant.util import dt as dt_util
 
 from .const import CONF_SCAN_INTERVAL, CONF_STORAGE_KEY, DEFAULT_SCAN_INTERVAL
 from .coordinator import SamsungHealthConfigEntry, SamsungHealthCoordinator, entry_paths
+from .daily_history import async_sync_sensor_history
 from .llm_api import SamsungHealthAPI
 from .sensor import day_fraction
 from .statistics import StatisticsWriter, async_remove_store, build_series
@@ -43,6 +44,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: SamsungHealthConfigEntry
                 build_series, coordinator.data, dt_util.as_local(now).date(), day_fraction(now)
             )
             await writer.async_write(series)
+            results = await async_sync_sensor_history(hass, entry.entry_id, coordinator.data, now)
+            entry.runtime_data.history_results = results
         except Exception:  # never let a statistics problem break polling
             _LOGGER.exception("Writing Samsung Health statistics failed")
 

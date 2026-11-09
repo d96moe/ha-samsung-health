@@ -187,7 +187,8 @@ async def test_statistics_written_once_then_only_changes(hass, setup, freezer):
     entry, written = setup
     await _load(hass, entry)
     ids = {sid for sid, _ in written}
-    assert {"ha_samsung_health:steps", "sensor.samsung_health_weight"} <= ids
+    assert "sensor.samsung_health_weight" in ids
+    assert not any(sid.startswith("ha_samsung_health:") for sid in ids)  # daily totals: on the sensors
     assert "ha_samsung_health:weight" not in ids
     # Last night's sleep sits at 12:00 UTC today, an hour the recorder hasn't
     # compiled at 11:00 UTC: held back, not written into it.

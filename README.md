@@ -53,25 +53,34 @@ into Home Assistant's long-term statistics:
   *Weight*, for example, in the History panel or its more-info dialog, and you see
   every weighing back to the first one.
 - **Daily totals** (steps, active, total and exercise calories, active time,
-  distance): the *today* sensors are daily totals that start over at local midnight
-  (`state_class: total`), like a "rain today" sensor. Home Assistant keeps their
-  statistics from the day you install the integration, on the sensors themselves.
-  The history from before that, and days your phone syncs late, are in separate
-  statistics: `ha_samsung_health:steps`, `ha_samsung_health:active_calories`,
-  `ha_samsung_health:total_calories` and `ha_samsung_health:exercise_calories`. Show
-  them as daily bars with a Statistics Graph card:
+  distance) are on the *today* sensors too. They are daily totals that start over
+  at local midnight (`state_class: total`), like a "rain today" sensor, and their
+  statistics hold every day back to the first one:
+  - Days before you installed the integration are added to the sensor's
+    statistics on the first polls (the history is written once the recorder has
+    compiled the sensor for the first time, so allow an hour after setup).
+  - A day your phone syncs late is corrected in place (the sensor's sum is
+    adjusted; nothing is duplicated).
+  - Today is the sensor's own, as it runs.
+
+  Show them as daily bars, or build other totals with helpers (Utility Meter,
+  Statistics), as with any sensor:
 
   ```yaml
   type: statistics-graph
   title: Steps per day
   entities:
-    - ha_samsung_health:steps
+    - sensor.samsung_health_steps
   period: day
   stat_types:
     - change
   chart_type: bar
   days_to_show: 30
   ```
+
+  Versions before 0.5.0 kept daily totals as separate statistics
+  (`ha_samsung_health:steps` and so on). They are no longer updated; Home Assistant
+  offers to remove them (see [Old daily statistics](#old-daily-statistics)).
 
 ## Requirements
 

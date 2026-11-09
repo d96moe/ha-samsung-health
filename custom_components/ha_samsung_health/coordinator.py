@@ -129,6 +129,8 @@ class SamsungHealthCoordinator(DataUpdateCoordinator[SamsungHealthData]):
         self._exercise_fingerprint: frozenset[tuple[str, float | None]] = frozenset()
         self._fetch_stats: dict[str, tuple[int, int, float]] = {}
         self._had_documents: frozenset[str] = frozenset()
+        #: daily sensor key -> last sensor_history.SyncResult (repairs.py reads it)
+        self.history_results: dict = {}
 
     @property
     def syncing(self) -> bool:

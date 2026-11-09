@@ -48,24 +48,20 @@ async def _rows(hass, key):
 
 
 async def test_history_written_once_across_restarts(hass):
-    series = _series([(9, 30), (10, 1), (10, 2)])
+    entity_id = _weight_entity(hass)
+    series = _weight_series(90.0, 85.0, 84.0)
     assert await StatisticsWriter(hass, "e1").async_write(series) > 0
     await async_wait_recording_done(hass)
-    assert [r["sum"] for r in await _rows(hass, "steps")] == [1000, 3000, 6000]
+    assert await _means(hass, entity_id) == [90.0, 85.0, 84.0]
 
     # "Restart": a new writer with the same persisted fingerprints writes nothing.
     restarted = StatisticsWriter(hass, "e1")
     assert await restarted.async_write(series) == 0
 
-    # A new day in October rewrites October only; September stays as written.
-    written = await restarted.async_write(_series([(9, 30), (10, 1), (10, 2), (10, 3)]))
+    # One more weighing: only its month is written; the rest stays as written.
+    assert await restarted.async_write(_weight_series(90.0, 85.0, 84.0, 83.0)) == 1
     await async_wait_recording_done(hass)
-    rows = await _rows(hass, "steps")
-    assert [r["sum"] for r in rows] == [1000, 3000, 6000, 10000]  # no duplicates, monotonic
-    assert len({r["start"] for r in rows}) == len(rows)
-    # steps, active and exercise kcal (no weighing, so no total-kcal estimate):
-    # 3 October rows each, never September's.
-    assert written == 3 * 3
+    assert await _means(hass, entity_id) == [90.0, 85.0, 84.0, 83.0]
 
 
 def _weight_series(*kgs):
@@ -126,18 +122,15 @@ async def test_old_external_measurements_are_moved_to_the_entity(hass, hass_stor
 
 
 async def test_statistics_deleted_in_recorder_are_rewritten(hass):
-    series = _series([(10, 1), (10, 2)])
+    entity_id = _weight_entity(hass)
+    series = _weight_series(90.0, 85.0)
     await StatisticsWriter(hass, "e1").async_write(series)
     await async_wait_recording_done(hass)
-
-    get_instance(hass).async_clear_statistics([statistic_id("steps")])
+    get_instance(hass).async_clear_statistics([entity_id])
     await async_wait_recording_done(hass)
-    assert await _rows(hass, "steps") == []
-
-    written = await StatisticsWriter(hass, "e1").async_write(series)
+    assert await StatisticsWriter(hass, "e1").async_write(series) == 2  # missing: written in full
     await async_wait_recording_done(hass)
-    assert written == 2  # only steps, which was missing
-    assert [r["sum"] for r in await _rows(hass, "steps")] == [1000, 3000]
+    assert await _means(hass, entity_id) == [90.0, 85.0]
 
 
 # --------------------------------------------------------------- recorder compile
@@ -200,27 +193,19 @@ async def test_deleted_weighing_disappears_from_the_history(hass):
     assert await _means(hass, entity_id) == [90.0]
 
 
-async def test_deleted_day_disappears_from_the_daily_totals(hass):
-    writer = StatisticsWriter(hass, "e1")
-    await writer.async_write(_series([(10, 1), (10, 2), (10, 3)]))
-    await async_wait_recording_done(hass)
-    await writer.async_write(_series([(10, 1), (10, 3)]))  # 10-02 deleted
-    await async_wait_recording_done(hass)
-    rows = await _rows(hass, "steps")
-    assert [r["start"] for r in rows] == [datetime(2026, 10, d, 12, tzinfo=UTC).timestamp() for d in (1, 3)]
-    assert [r["sum"] for r in rows] == [1000, 3000]
 
 
 async def test_statistics_deleted_in_recorder_are_rewritten_on_the_next_poll(hass):
+    entity_id = _weight_entity(hass)
     writer = StatisticsWriter(hass, "e1")  # the same writer: no restart in between
-    series = _series([(10, 1), (10, 2)])
+    series = _weight_series(90.0, 85.0)
     await writer.async_write(series)
     await async_wait_recording_done(hass)
-    get_instance(hass).async_clear_statistics([statistic_id("steps")])
+    get_instance(hass).async_clear_statistics([entity_id])
     await async_wait_recording_done(hass)
     await writer.async_write(series)
     await async_wait_recording_done(hass)
-    assert [r["sum"] for r in await _rows(hass, "steps")] == [1000, 3000]
+    assert await _means(hass, entity_id) == [90.0, 85.0]
 
 
 async def test_entity_with_another_display_unit_gets_converted_history(hass):
@@ -230,3 +215,10 @@ async def test_entity_with_another_display_unit_gets_converted_history(hass):
     await async_wait_recording_done(hass)
     [mean] = await _means(hass, entity_id)
     assert abs(mean - 90.0 / 0.45359237) < 1e-6
+
+
+
+async def test_daily_totals_are_not_written_as_external_statistics(hass):
+    assert await StatisticsWriter(hass, "e1").async_write(_series([(10, 1), (10, 2)])) == 0
+    await async_wait_recording_done(hass)
+    assert await _rows(hass, "steps") == []

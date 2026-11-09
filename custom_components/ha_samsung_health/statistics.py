@@ -364,6 +364,10 @@ class StatisticsWriter:
         total, save = 0, first_load
         for key, values in series.items():
             spec = SPECS[key]
+            if spec.cumulative:
+                # Daily totals live on the "today" sensors now (daily_history.py); the
+                # old ha_samsung_health:<key> series are legacy (see repairs.py).
+                continue
             entity_id = unit = None
             if not spec.cumulative:
                 if (entity_id := self._entity_id(key)) is None:
