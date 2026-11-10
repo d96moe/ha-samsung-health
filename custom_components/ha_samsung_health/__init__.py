@@ -13,7 +13,9 @@ from datetime import timedelta
 
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import llm
+from homeassistant.helpers.typing import ConfigType
 from homeassistant.util import dt as dt_util
 
 from .const import CONF_SCAN_INTERVAL, CONF_STORAGE_KEY, DEFAULT_SCAN_INTERVAL, DOMAIN
@@ -27,6 +29,12 @@ from .statistics import StatisticsWriter, async_remove_store, build_series
 _LOGGER = logging.getLogger(__name__)
 PLATFORMS = [Platform.SENSOR, Platform.BINARY_SENSOR, Platform.BUTTON]
 SERVICE_REMOVE_LEGACY = "remove_legacy_statistics"
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
+
+
+async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
+    hass.services.async_register(DOMAIN, SERVICE_REMOVE_LEGACY, async_handle_remove_service)
+    return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: SamsungHealthConfigEntry) -> bool:
@@ -51,13 +59,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: SamsungHealthConfigEntry
                 )
                 await writer.async_write(series)
                 results = await async_sync_sensor_history(hass, entry.entry_id, coordinator.data, now)
-                entry.runtime_data.history_results = results
                 await async_check_legacy(hass, results)
             except Exception:  # never let a statistics problem break polling
                 _LOGGER.exception("Writing Samsung Health statistics failed")
 
-    if not hass.services.has_service(DOMAIN, SERVICE_REMOVE_LEGACY):
-        hass.services.async_register(DOMAIN, SERVICE_REMOVE_LEGACY, async_handle_remove_service)
 
     @callback
     def _on_update() -> None:

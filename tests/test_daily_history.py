@@ -1,5 +1,6 @@
 """Daily totals live on the sensors themselves (history on the sensors, step 2)."""
 from datetime import UTC, date, datetime, timedelta
+from unittest.mock import patch
 
 from homeassistant.components.recorder import get_instance
 from homeassistant.components.recorder.statistics import statistics_during_period
@@ -67,3 +68,25 @@ async def test_external_daily_series_no_longer_written(hass, setup, freezer):
     await _load_and_compile(hass, entry, freezer)
     ids = {sid for sid, _ in written}
     assert not any(sid.startswith("ha_samsung_health:") for sid in ids)
+
+
+async def test_history_uses_the_statistics_unit(hass, setup, freezer):
+    """Review #2: distance statistics in m while the display unit is km → truth in m."""
+    entry, _ = setup
+    FakeApi.docs = HISTORY
+    await _load_and_compile(hass, entry, freezer)
+    seen = {}
+
+    async def capture(hass_, entity_id, unit, unit_class, daily, now, **kw):
+        seen[entity_id] = (unit, unit_class, daily.get(date(2026, 11, 3)))
+        from custom_components.ha_samsung_health.sensor_history import SyncResult
+        return SyncResult()
+
+    async def stats_unit(hass_, entity_id):
+        return ("m", "distance") if entity_id.endswith("_distance") else None
+
+    with patch("custom_components.ha_samsung_health.daily_history.async_sync_daily_history", capture), \
+         patch("custom_components.ha_samsung_health.daily_history.async_statistics_unit", stats_unit):
+        from custom_components.ha_samsung_health.daily_history import async_sync_sensor_history
+        await async_sync_sensor_history(hass, entry.entry_id, entry.runtime_data.data, NOW)
+    assert seen["sensor.samsung_health_distance"] == ("m", "distance", 5000.0)

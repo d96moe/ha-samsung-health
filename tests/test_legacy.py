@@ -15,7 +15,7 @@ from .test_init import _load
 
 LEGACY = ["ha_samsung_health:steps", "ha_samsung_health:active_calories",
           "ha_samsung_health:total_calories", "ha_samsung_health:exercise_calories"]
-IN_SYNC = {"steps": SyncResult(), "distance": SyncResult()}
+IN_SYNC = {k: SyncResult() for k in ("steps", "active_calories", "total_calories", "exercise_calories", "distance")}
 
 
 async def _legacy(hass, ids=LEGACY):
@@ -81,3 +81,13 @@ async def test_service_removes_the_legacy_series(hass, setup):
     await hass.services.async_call(DOMAIN, "remove_legacy_statistics", {}, blocking=True)
     await async_wait_recording_done(hass)
     assert await _existing(hass) == set()
+
+
+async def test_issue_requires_every_legacy_sensor_verified(hass):
+    """Review #4: a missing or disabled sensor must not count as verified."""
+    await _legacy(hass)
+    partial = {"steps": SyncResult(), "active_calories": SyncResult(), "exercise_calories": SyncResult()}
+    await repairs.async_check_legacy(hass, partial)  # total_calories missing
+    assert _issue(hass) is None
+    await repairs.async_check_legacy(hass, {**partial, "total_calories": SyncResult()})
+    assert _issue(hass) is not None

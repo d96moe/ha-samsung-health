@@ -17,7 +17,7 @@ from homeassistant.helpers import entity_registry as er
 from . import parsers
 from .const import DOMAIN
 from .coordinator import SamsungHealthData
-from .sensor_history import SyncResult, async_sync_daily_history
+from .sensor_history import SyncResult, async_statistics_unit, async_sync_daily_history
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -71,11 +71,19 @@ async def async_sync_sensor_history(
         state = hass.states.get(entity_id) if entity_id else None
         if entity_id is None or state is None:
             continue
-        unit = state.attributes.get("unit_of_measurement", native)
+        # Write in the unit of the existing statistics (the recorder keeps it when the
+        # display unit changes); the state's unit only for a sensor without any yet.
+        existing = await async_statistics_unit(hass, entity_id)
+        unit = existing[0] if existing else state.attributes.get("unit_of_measurement", native)
         convert, unit_class = _converter(native, device_class, unit)
         if convert is None:
-            _LOGGER.debug("No history for %s: can't convert %s to %s", entity_id, native, unit)
+            _LOGGER.warning("No history for %s: can't convert %s to %s", entity_id, native, unit)
             continue
+        if existing:
+            unit_class = existing[1]
         daily = {day: convert(value) for day, value in truth[key].items()}
-        results[key] = await async_sync_daily_history(hass, entity_id, unit, unit_class, daily, now)
+        # A download that suddenly lacks many days is refused rather than zeroing them.
+        results[key] = await async_sync_daily_history(
+            hass, entity_id, unit, unit_class, daily, now, guard_removals=True
+        )
     return results

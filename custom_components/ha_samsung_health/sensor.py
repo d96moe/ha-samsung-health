@@ -2,8 +2,9 @@
 
 Measurements (body, sleep, recovery) have state_class measurement: their full
 history is imported onto the entity's own statistic, so the History panel shows it.
-Daily totals (steps, calories, active time, distance) reset at midnight and have no
-state_class: their history is in external statistics (see statistics.py)."""
+Daily totals (steps, calories, active time, distance) reset at local midnight and
+have state_class total: the recorder compiles their statistics, and their whole
+history is reconciled onto them (daily_history.py, sensor_history.py)."""
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -262,8 +263,8 @@ class SamsungHealthSensor(CoordinatorEntity[SamsungHealthCoordinator], RestoreSe
             self._attr_state_class = SensorStateClass.MEASUREMENT
         elif description.attrs_fn is _today_attr:
             # A daily total that starts over at midnight, like a "rain today" sensor:
-            # the recorder keeps its statistics from now on. Nothing is imported onto
-            # it; the full history lives in the ha_samsung_health:<key> statistic.
+            # the recorder keeps its statistics, and daily_history.py adds the days
+            # before it existed and corrects late-synced days on them.
             self._attr_state_class = SensorStateClass.TOTAL
         self._daily_total = description.key not in ENTITY_KEYS and description.attrs_fn is _today_attr
         self._attr_unique_id = f"{coordinator.config_entry.entry_id}_{description.key}"

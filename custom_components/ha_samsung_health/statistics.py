@@ -10,11 +10,9 @@ Two kinds, because they behave differently:
   it hasn't compiled yet makes that compile fail and roll back the hour for every
   entity. So rows are only imported for hours already compiled (COMPILE_MARGIN);
   newer ones wait for a later poll.
-- Daily totals (steps, calories) stay external statistics
-  ("ha_samsung_health:<key>"), and those entities have no state_class. Their
-  value resets at midnight, so the recorder would keep its own running sum on the
-  entity, and importing history whenever the phone syncs a past day late would
-  break that sum (see ha-workouts' statistics_import.py).
+- Daily totals (steps, calories, ...) are not written here any more: they live on
+  the "today" sensors (state_class total), see daily_history.py. Their old
+  external statistics ("ha_samsung_health:<key>") are legacy (repairs.py).
 
 Every poll already holds the FULL history in memory (the cloud ignores time
 filters), so every series is computed deterministically from scratch. Cumulative

@@ -151,3 +151,70 @@ async def test_long_history_is_batched(hass, tz, freezer):
     assert len(imported.call_args.args[2]) == 3000
     assert adjusted.call_count == 1
     assert result.imported_rows == 3000
+
+
+async def test_short_term_rows_only_are_shifted_too(hass, tz, freezer):
+    """Review #1: 5-minute rows but no hourly row yet (fresh or deleted statistics)."""
+    attrs = {"state_class": "total", "unit_of_measurement": "steps",
+             "last_reset": dt_util.start_of_local_day(D(9)).isoformat()}
+    freezer.move_to(H(9, 8) + timedelta(minutes=1))
+    hass.states.async_set(ENTITY, "30", attrs)
+    await async_wait_recording_done(hass)
+    freezer.move_to(H(9, 8) + timedelta(minutes=6))
+    do_adhoc_statistics(hass, start=H(9, 8))  # a 5-minute row, no hourly row yet
+    await async_wait_recording_done(hass)
+    await _sync(hass, {D(1): 100, D(2): 200}, now=H(9, 8) + timedelta(minutes=7))
+    await _live(hass, freezer, [(H(9, 8), 60)])
+    sums = await _sums(hass)
+    assert sums == sorted(sums)  # never drops below the imported history
+    changes = await _changes(hass)
+    assert changes[D(1)] == 100 and changes[D(2)] == 200
+    assert changes.get(D(9), 0) >= 0
+
+
+async def test_correcting_imported_days_is_one_import(hass, tz, freezer):
+    """Review #3: many changed pre-sensor days = one re-import + one adjust, not one per day."""
+    await _live(hass, freezer, [(H(9, 8), 5)])
+    daily = {date(2026, 1, 1) + timedelta(days=i): 100.0 for i in range(200)}
+    await _sync(hass, daily)
+    changed = {d: v + (1 if i % 2 else 0) for i, (d, v) in enumerate(daily.items())}
+    instance = get_instance(hass)
+    real_import = sensor_history.async_import_statistics
+    with patch.object(sensor_history, "async_import_statistics", side_effect=real_import) as imported, \
+         patch.object(instance, "async_adjust_statistics", wraps=instance.async_adjust_statistics) as adjusted:
+        await _sync(hass, changed)
+    assert imported.call_count == 1
+    assert adjusted.call_count == 1
+    assert (await _sync(hass, changed)).in_sync is True
+    changes = await _changes(hass)
+    assert changes[date(2026, 1, 2)] == 101 and changes[date(2026, 1, 1)] == 100
+
+
+async def test_corrected_imported_day_keeps_the_rest(hass, tz, freezer):
+    await _live(hass, freezer, [(H(9, 8), 5)])
+    await _sync(hass, {D(1): 100, D(2): 200, D(3): 300})
+    await _sync(hass, {D(1): 100, D(2): 250, D(3): 300})
+    changes = await _changes(hass)
+    assert (changes[D(1)], changes[D(2)], changes[D(3)]) == (100, 250, 300)
+    sums = await _sums(hass)
+    assert sums == sorted(sums)
+
+
+async def test_mass_removal_is_refused_when_guarded(hass, tz, freezer):
+    """Review #3: a truncated download must not zero the history."""
+    await _live(hass, freezer, [(H(9, 8), 5)])
+    daily = {date(2026, 1, 1) + timedelta(days=i): 100.0 for i in range(50)}
+    await _sync(hass, daily)
+    result = await async_sync_daily_history(hass, ENTITY, "steps", None, {}, dt_util.utcnow(),
+                                            guard_removals=True)
+    assert result.suspicious is True and result.in_sync is False
+    assert (await _changes(hass))[date(2026, 1, 1)] == 100  # untouched
+
+
+async def test_statistics_unit_comes_from_existing_metadata(hass, tz, freezer):
+    """Review #2: the recorder keeps the metadata unit when the display unit changes."""
+    from custom_components.ha_samsung_health.sensor_history import async_statistics_unit
+
+    assert await async_statistics_unit(hass, ENTITY) is None  # no statistics yet
+    await _live(hass, freezer, [(H(9, 8), 5)])
+    assert await async_statistics_unit(hass, ENTITY) == ("steps", None)
