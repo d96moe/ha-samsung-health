@@ -44,33 +44,98 @@
   },
   "entity": {
     "sensor": {
-      "steps": { "name": "Steps" },
-      "active_calories": { "name": "Active calories" },
-      "total_calories": { "name": "Total calories (estimated)" },
-      "exercise_calories": { "name": "Exercise calories" },
-      "active_time": { "name": "Active time" },
-      "distance": { "name": "Distance" },
-      "weight": { "name": "Weight" },
-      "body_fat": { "name": "Body fat" },
-      "body_fat_mass": { "name": "Body fat mass" },
-      "skeletal_muscle_mass": { "name": "Skeletal muscle mass" },
-      "body_water": { "name": "Body water" },
-      "bmr": { "name": "BMR" },
-      "sleep_duration": { "name": "Sleep duration" },
-      "time_in_bed": { "name": "Time in bed" },
-      "sleep_score": { "name": "Sleep score" },
-      "bedtime": { "name": "Bedtime" },
-      "wake_time": { "name": "Wake-up time" },
-      "sleeping_heart_rate": { "name": "Sleeping heart rate" },
-      "sleeping_hrv": { "name": "Sleeping HRV" },
-      "energy_score": { "name": "Energy score" },
-      "last_cloud_sync": { "name": "Last cloud sync" }
+      "steps": {
+        "name": "Steps"
+      },
+      "active_calories": {
+        "name": "Active calories"
+      },
+      "total_calories": {
+        "name": "Total calories (estimated)"
+      },
+      "exercise_calories": {
+        "name": "Exercise calories"
+      },
+      "active_time": {
+        "name": "Active time"
+      },
+      "distance": {
+        "name": "Distance"
+      },
+      "weight": {
+        "name": "Weight"
+      },
+      "body_fat": {
+        "name": "Body fat"
+      },
+      "body_fat_mass": {
+        "name": "Body fat mass"
+      },
+      "skeletal_muscle_mass": {
+        "name": "Skeletal muscle mass"
+      },
+      "body_water": {
+        "name": "Body water"
+      },
+      "bmr": {
+        "name": "BMR"
+      },
+      "sleep_duration": {
+        "name": "Sleep duration"
+      },
+      "time_in_bed": {
+        "name": "Time in bed"
+      },
+      "sleep_score": {
+        "name": "Sleep score"
+      },
+      "bedtime": {
+        "name": "Bedtime"
+      },
+      "wake_time": {
+        "name": "Wake-up time"
+      },
+      "sleeping_heart_rate": {
+        "name": "Sleeping heart rate"
+      },
+      "sleeping_hrv": {
+        "name": "Sleeping HRV"
+      },
+      "energy_score": {
+        "name": "Energy score"
+      },
+      "last_cloud_sync": {
+        "name": "Last cloud sync"
+      }
     },
     "binary_sensor": {
-      "cloud_sync_stale": { "name": "Cloud sync stale" }
+      "cloud_sync_stale": {
+        "name": "Cloud sync stale"
+      }
     },
     "button": {
-      "sync_now": { "name": "Sync now" }
+      "sync_now": {
+        "name": "Sync now"
+      }
+    }
+  },
+  "issues": {
+    "legacy_statistics": {
+      "title": "Samsung Health history moved to the sensors",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "Remove the old daily statistics?",
+            "description": "Daily totals (steps, active, total and exercise calories) now live on the Samsung Health sensors themselves, with their whole history, and that history has been checked. The old statistics `ha_samsung_health:steps`, `ha_samsung_health:active_calories`, `ha_samsung_health:total_calories` and `ha_samsung_health:exercise_calories` are no longer updated.\n\nTake a backup of Home Assistant first: removing them can't be undone. Cards that show these statistics should use the sensors instead."
+          }
+        }
+      }
+    }
+  },
+  "services": {
+    "remove_legacy_statistics": {
+      "name": "Remove old daily statistics",
+      "description": "Delete the daily statistics of versions before 0.5.0 (ha_samsung_health:steps, active_calories, total_calories, exercise_calories). The daily history now lives on the sensors. Take a backup first: this can't be undone."
     }
   }
 }

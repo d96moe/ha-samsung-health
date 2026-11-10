@@ -169,6 +169,10 @@ async def test_abandoned_sign_in_leaves_no_files(hass):
     assert created[0].exists()
     hass.config_entries.flow.async_abort(result["flow_id"])
     await hass.async_block_till_done()
+    for _ in range(100):  # removed in an executor thread (async_remove can't await)
+        if not created[0].exists():
+            break
+        await asyncio.sleep(0.01)
     assert not created[0].exists()
 
 

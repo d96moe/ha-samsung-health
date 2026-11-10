@@ -2,10 +2,11 @@
 
 Reads Samsung Health's own cloud sync data (via the reverse-engineered
 samsung-re-health library) into Home Assistant's recorder: daily activity, body
-composition, sleep and recovery, with full history as external statistics.
+composition, sleep and recovery, with the full history on the sensors themselves.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import shutil
 from datetime import timedelta
@@ -15,15 +16,17 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import llm
 from homeassistant.util import dt as dt_util
 
-from .const import CONF_SCAN_INTERVAL, CONF_STORAGE_KEY, DEFAULT_SCAN_INTERVAL
+from .const import CONF_SCAN_INTERVAL, CONF_STORAGE_KEY, DEFAULT_SCAN_INTERVAL, DOMAIN
 from .coordinator import SamsungHealthConfigEntry, SamsungHealthCoordinator, entry_paths
 from .daily_history import async_sync_sensor_history
 from .llm_api import SamsungHealthAPI
+from .repairs import async_check_legacy, async_handle_remove_service
 from .sensor import day_fraction
 from .statistics import StatisticsWriter, async_remove_store, build_series
 
 _LOGGER = logging.getLogger(__name__)
 PLATFORMS = [Platform.SENSOR, Platform.BINARY_SENSOR, Platform.BUTTON]
+SERVICE_REMOVE_LEGACY = "remove_legacy_statistics"
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: SamsungHealthConfigEntry) -> bool:
@@ -33,21 +36,28 @@ async def async_setup_entry(hass: HomeAssistant, entry: SamsungHealthConfigEntry
     entry.runtime_data = coordinator
 
     writer = StatisticsWriter(hass, entry.entry_id)
+    # One write at a time: two overlapping syncs would apply the same correction twice.
+    write_lock = asyncio.Lock()
 
     async def _write_statistics() -> None:
-        if coordinator.data is None:
-            return
-        now = dt_util.utcnow()
-        try:
-            # The whole history: build it in the executor, not on the event loop.
-            series = await hass.async_add_executor_job(
-                build_series, coordinator.data, dt_util.as_local(now).date(), day_fraction(now)
-            )
-            await writer.async_write(series)
-            results = await async_sync_sensor_history(hass, entry.entry_id, coordinator.data, now)
-            entry.runtime_data.history_results = results
-        except Exception:  # never let a statistics problem break polling
-            _LOGGER.exception("Writing Samsung Health statistics failed")
+        async with write_lock:
+            if coordinator.data is None:
+                return
+            now = dt_util.utcnow()
+            try:
+                # The whole history: build it in the executor, not on the event loop.
+                series = await hass.async_add_executor_job(
+                    build_series, coordinator.data, dt_util.as_local(now).date(), day_fraction(now)
+                )
+                await writer.async_write(series)
+                results = await async_sync_sensor_history(hass, entry.entry_id, coordinator.data, now)
+                entry.runtime_data.history_results = results
+                await async_check_legacy(hass, results)
+            except Exception:  # never let a statistics problem break polling
+                _LOGGER.exception("Writing Samsung Health statistics failed")
+
+    if not hass.services.has_service(DOMAIN, SERVICE_REMOVE_LEGACY):
+        hass.services.async_register(DOMAIN, SERVICE_REMOVE_LEGACY, async_handle_remove_service)
 
     @callback
     def _on_update() -> None:

@@ -1,0 +1,6 @@
+remove_legacy_statistics:
+  name: Remove old daily statistics
+  description: >-
+    Delete the daily statistics of versions before 0.5.0 (ha_samsung_health:steps,
+    active_calories, total_calories, exercise_calories). The daily history now lives
+    on the sensors. Take a backup first: this can't be undone.

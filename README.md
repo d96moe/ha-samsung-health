@@ -145,6 +145,20 @@ sign-in isn't possible.
 The sign-in is stored under `/config/.storage/ha_samsung_health/` and is refreshed
 automatically. If Samsung stops accepting it, Home Assistant asks you to sign in again.
 
+## Old daily statistics
+
+Versions before 0.5.0 kept the daily totals as separate statistics:
+`ha_samsung_health:steps`, `ha_samsung_health:active_calories`,
+`ha_samsung_health:total_calories` and `ha_samsung_health:exercise_calories`. They are
+no longer updated: the history is on the sensors now.
+
+Once a poll has found every daily sensor's history complete and correct, Home
+Assistant shows a repair, *Samsung Health history moved to the sensors*, under
+Settings → System → Repairs. Confirming it deletes the four old statistics. You can
+also call the action `ha_samsung_health.remove_legacy_statistics`. Nothing is deleted
+without one of these. **Take a backup first**: deleting statistics can't be undone.
+Point any cards that show the old statistics at the sensors.
+
 ## Workouts in ha-workouts
 
 Individual workouts (type, duration, Samsung's calories, heart rate) are available to
