@@ -12,14 +12,20 @@ python3 -m venv .venv
 .venv/bin/python -m pytest tests --timeout 30
 ```
 
-The suite must pass with **zero skipped tests**: a skip is a false green.
+Validate with Home Assistant's own **hassfest** too (needs Docker):
+
+```
+docker run --rm -v "$PWD":/github/workspace ghcr.io/home-assistant/hassfest:latest
+```
+
+hassfest must report no errors, and the suite must pass with **zero skipped tests**: a skip is a false green.
 
 ## CI
 
-`ci/Jenkinsfile` is the maintainer's Jenkins pipeline. It does exactly the steps above
-in a fresh venv (lint, the full suite with a JUnit report, then a gate that fails the
-build if any test was skipped), for the branch given in its `BRANCH` parameter. It
-expects an agent with Python 3.14 at `/usr/local/bin/python3.14`; you don't need
+`Jenkinsfile` is the maintainer's Jenkins pipeline. It does exactly the steps above
+in clean containers: hassfest, then lint and the full suite with a JUnit report, then a gate that fails the
+build if any test was skipped, for the branch given in its `BRANCH` parameter. It
+needs Docker on the agent (images `ghcr.io/home-assistant/hassfest` and `python:3.14-slim`); you don't need
 Jenkins to work on the integration.
 
 ## Notes for contributors

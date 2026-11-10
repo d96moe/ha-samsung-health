@@ -271,6 +271,12 @@ class SamsungHealthSensor(CoordinatorEntity[SamsungHealthCoordinator], RestoreSe
         self._restored_value: Any = None
         self._restored_attrs: dict[str, Any] | None = None
 
+    async def async_entity_id_changed(self, old_entity_id: str) -> None:
+        """Renamed in place (HA 2026.11+) instead of removed and re-added. Nothing
+        here depends on this entity's own id, so there is nothing to update."""
+        if (parent := getattr(super(), "async_entity_id_changed", None)) is not None:
+            await parent(old_entity_id)
+
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
         if self.entity_description.attrs_fn is _today_attr:

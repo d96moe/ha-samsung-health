@@ -1,4 +1,5 @@
 samsung-re-health==0.7.2
-pytest-homeassistant-custom-component>=0.13.317
+# Home Assistant 2026.10.4 (no plugin release for 2026.11 yet)
+pytest-homeassistant-custom-component==0.13.375
 pytest-timeout
 ruff

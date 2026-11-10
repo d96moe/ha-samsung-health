@@ -1,7 +1,10 @@
 // =============================================================================
 // Jenkinsfile: ha-samsung-health (d96moe)
-// Runs the full pytest suite in a Python venv on the Jenkins agent, then fails the
-// build if any test was skipped (a skip is a false green).
+// hassfest (Home Assistant's own validator), then ruff + the full pytest suite in a
+// clean Python container, then a gate that fails the build on any skipped test
+// (a skip is a false green). Runs on changes (SCM poll: GitHub can't reach this
+// Jenkins) and weekly, to catch new Home Assistant deprecations.
+// Needs Docker on the agent.
 // =============================================================================
 
 pipeline {
@@ -11,10 +14,15 @@ pipeline {
         string(name: 'BRANCH', defaultValue: 'main', description: 'Branch to test')
     }
 
+    triggers {
+        pollSCM('H/15 * * * *')
+        cron('H 4 * * 1')
+    }
+
     options {
         disableConcurrentBuilds()
         timestamps()
-        timeout(time: 15, unit: 'MINUTES')
+        timeout(time: 30, unit: 'MINUTES')
     }
 
     stages {
@@ -25,26 +33,23 @@ pipeline {
             }
         }
 
-        stage('Lint') {
+        stage('hassfest') {
             steps {
-                sh """
-                    /usr/local/bin/python3.14 -m venv .venv
-                    .venv/bin/pip install --upgrade pip
-                    .venv/bin/pip install -r requirements_test.txt
-                    .venv/bin/ruff check --select F,E,W,B,I,UP --ignore E501 custom_components tests
-                """
+                sh 'docker run --rm -v "$WORKSPACE":/github/workspace ghcr.io/home-assistant/hassfest:latest'
             }
         }
 
-        stage('Test') {
+        stage('Lint + pytest') {
             steps {
-                sh """
-                    .venv/bin/python3.14 -m pytest tests/ \
-                        -p no:cacheprovider \
-                        --tb=short \
-                        -q \
-                        --junitxml=test-results.xml
-                """
+                sh '''
+                    docker run --rm -v "$WORKSPACE":/w -w /w --user "$(id -u):$(id -g)" -e HOME=/tmp                         python:3.14-slim bash -ec "
+                            python -m venv /tmp/venv
+                            /tmp/venv/bin/pip install -q --upgrade pip
+                            /tmp/venv/bin/pip install -q -r requirements_test.txt
+                            /tmp/venv/bin/ruff check --select F,E,W,B,I,UP --ignore E501 custom_components tests
+                            /tmp/venv/bin/python -m pytest tests -q -p no:cacheprovider --timeout 30 --tb=short                                 --junitxml=test-results.xml
+                        "
+                '''
             }
         }
 
@@ -66,7 +71,7 @@ pipeline {
         always {
             junit allowEmptyResults: true, testResults: 'test-results.xml'
         }
-        success { echo 'All tests passed.' }
+        success { echo 'hassfest OK, all tests passed.' }
         failure { echo 'Build failed: check the log above.' }
     }
 }

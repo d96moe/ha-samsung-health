@@ -159,3 +159,11 @@ async def test_daily_total_sensors_get_their_own_statistics(hass, setup):
     # measurements keep theirs; values without statistics stay without
     assert hass.states.get("sensor.samsung_health_weight").attributes["state_class"] == "measurement"
     assert "state_class" not in hass.states.get("sensor.samsung_health_last_cloud_sync").attributes
+
+
+def test_sensor_opts_in_to_in_place_entity_id_changes():
+    """HA 2026.11: implement async_entity_id_changed next to async_added_to_hass."""
+    from custom_components.ha_samsung_health.sensor import SamsungHealthSensor
+
+    assert "async_added_to_hass" in SamsungHealthSensor.__dict__
+    assert "async_entity_id_changed" in SamsungHealthSensor.__dict__

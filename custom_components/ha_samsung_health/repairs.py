@@ -13,9 +13,8 @@ from typing import Any
 import voluptuous as vol
 from homeassistant.components.recorder import get_instance
 from homeassistant.components.recorder.statistics import get_metadata
-from homeassistant.components.repairs import RepairsFlow
+from homeassistant.components.repairs import RepairsFlow, RepairsFlowResult
 from homeassistant.core import HomeAssistant, ServiceCall
-from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers import issue_registry as ir
 
 from .const import DOMAIN
@@ -57,10 +56,10 @@ async def async_handle_remove_service(call: ServiceCall) -> None:
 
 
 class LegacyStatisticsFlow(RepairsFlow):
-    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> RepairsFlowResult:
         return await self.async_step_confirm()
 
-    async def async_step_confirm(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+    async def async_step_confirm(self, user_input: dict[str, Any] | None = None) -> RepairsFlowResult:
         if user_input is not None:
             await async_remove_legacy(self.hass)
             return self.async_create_entry(data={})
