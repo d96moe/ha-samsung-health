@@ -159,7 +159,32 @@ def parse_exercises(envelopes: Iterable[dict[str, Any]]) -> list[ExerciseSession
                 max_hr=_num(rec.get("max_heart_rate")) or None,
             )
         )
-    return sorted(out, key=lambda s: s.start)
+    return _without_duplicates(sorted(out, key=lambda s: s.start))
+
+
+def _duplicate_rank(s: ExerciseSession) -> tuple:
+    """Which copy of a duplicated session to keep: one with heart rate (the watch's), then the longest distance."""
+    return (s.mean_hr is not None, s.distance_m or 0.0, s.duration_s)
+
+
+def _without_duplicates(sessions: list[ExerciseSession]) -> list[ExerciseSession]:
+    """Drop sessions that are another device's copy of the same workout.
+
+    The cloud can hold the same workout twice, e.g. recorded by the watch and
+    auto-detected by the phone (2026-11-11: two walks 07:59-08:35 and 08:03-08:33).
+    Sessions of the same type whose time ranges overlap are copies; only the best
+    (_duplicate_rank) is kept. Sessions that merely touch, or of another type, stay.
+    """
+    kept: list[ExerciseSession] = []
+    for s in sessions:  # sorted by start
+        end = s.start + timedelta(seconds=s.duration_s)
+        clash = next((k for k in kept if k.exercise_type == s.exercise_type
+                      and s.start < k.start + timedelta(seconds=k.duration_s) and k.start < end), None)
+        if clash is None:
+            kept.append(s)
+        elif _duplicate_rank(s) > _duplicate_rank(clash):
+            kept[kept.index(clash)] = s
+    return kept
 
 
 def parse_daily_activity(

@@ -63,6 +63,36 @@ def test_exercise_local_day_uses_time_offset():
     assert days[date(2026, 7, 2)].exercise_kcal == 100
 
 
+def _walk(start, minutes, *, calorie, distance, hr, exercise_type=1001):
+    rec = exercise(start, minutes=minutes, calorie=calorie, exercise_type=exercise_type)
+    rec["data"].update(distance=distance, mean_heart_rate=hr, max_heart_rate=hr)
+    return rec
+
+
+def test_overlapping_duplicate_sessions_keep_the_one_with_heart_rate():
+    """2026-11-11: the same morning walk came twice from the cloud (watch + phone).
+
+    Only one may count: the one with heart rate (the watch's), not the phone's
+    longer-running, heart-rate-less copy. Other overlaps (another type) stay.
+    """
+    phone = _walk(datetime(2026, 11, 11, 6, 59, 33, tzinfo=UTC), 35.5, calorie=202, distance=2380, hr=None)
+    watch = _walk(datetime(2026, 11, 11, 7, 3, 35, tzinfo=UTC), 30.2, calorie=220, distance=3040, hr=126)
+    climb = _walk(datetime(2026, 11, 11, 7, 10, tzinfo=UTC), 20, calorie=150, distance=0, hr=110,
+                  exercise_type=13002)
+    later = _walk(datetime(2026, 11, 11, 11, 42, tzinfo=UTC), 26, calorie=176, distance=1720, hr=95)
+    sessions = parsers.parse_exercises([phone, later, climb, watch])
+    walks = [s for s in sessions if s.exercise_type == 1001]
+    assert [(s.distance_m, s.mean_hr) for s in walks] == [(3040, 126), (1720, 95)]
+    assert sum(s.exercise_type == 13002 for s in sessions) == 1
+    assert parsers.parse_daily_activity([], [], sessions)[date(2026, 11, 11)].exercise_kcal == 220 + 150 + 176
+
+
+def test_sessions_that_only_touch_are_not_duplicates():
+    a = _walk(datetime(2026, 11, 11, 7, 0, tzinfo=UTC), 30, calorie=200, distance=3000, hr=120)
+    b = _walk(datetime(2026, 11, 11, 7, 30, tzinfo=UTC), 30, calorie=200, distance=3000, hr=120)
+    assert len(parsers.parse_exercises([a, b])) == 2
+
+
 def test_sleep_counts_for_wake_up_day():
     [s] = parsers.parse_sleep([
         sleep(datetime(2026, 10, 21, 21, 0, tzinfo=UTC), datetime(2026, 10, 22, 5, 0, tzinfo=UTC),
