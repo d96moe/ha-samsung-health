@@ -12,6 +12,7 @@ from custom_components.ha_samsung_health.const import (
     CONF_STORAGE_KEY,
     DOMAIN,
     MANIFEST_ACTIVITY,
+    MANIFEST_BLOOD_PRESSURE,
     MANIFEST_EXERCISE,
     MANIFEST_SLEEP,
     MANIFEST_SLEEP_STAGE,
@@ -20,7 +21,18 @@ from custom_components.ha_samsung_health.const import (
     MANIFEST_WEIGHT,
 )
 
-from .helpers import CET, day_summary, exercise, sleep, sleep_stage, step_trend, vitality, weight
+from .helpers import (
+    CET,
+    WATCH_APP,
+    blood_pressure,
+    day_summary,
+    exercise,
+    sleep,
+    sleep_stage,
+    step_trend,
+    vitality,
+    weight,
+)
 from .test_init import NOW, FakeApi
 
 SLEEP_START = datetime(2026, 11, 5, 22, 0, tzinfo=UTC)
@@ -49,6 +61,11 @@ DOCS = {
         sleep_stage(SLEEP_START, SLEEP_START + timedelta(minutes=30), datetime(2026, 11, 6, 5, 30, tzinfo=UTC), stage=40002),
     ],
     MANIFEST_VITALITY: [vitality(2026, 11, 6, shr=60, shrv=40, score=70.0)],
+    MANIFEST_BLOOD_PRESSURE: [
+        blood_pressure(datetime(2026, 11, 2, 16, 0, tzinfo=UTC), systolic=122, diastolic=80, pulse=70),
+        blood_pressure(datetime(2026, 11, 2, 18, 0, tzinfo=UTC), systolic=116, diastolic=74, pulse=64),
+        blood_pressure(datetime(2026, 11, 6, 6, 10, tzinfo=UTC), systolic=121, diastolic=79, pulse=68, app=WATCH_APP),
+    ],
 }
 
 CONTEXT = llm.LLMContext(platform="test", context=None, language="en", assistant="conversation", device_id=None)
@@ -139,6 +156,24 @@ async def test_history_daily_totals_per_week(api):
     assert rows["2026-11-02"]["total"] == 8000 + 4000 + 6100
     assert rows["2026-11-02"]["days_with_data"] == 3
     assert data["kind"] == "daily total"
+
+
+async def test_summary_has_latest_blood_pressure_on_or_before_the_day(api):
+    _, instance = api
+    today = await call(instance, "get_health_summary")
+    assert today["blood_pressure_latest_reading"] == {
+        "measured_at": "2026-11-06T07:10:00+01:00", "systolic_mmhg": 121, "diastolic_mmhg": 79,
+        "pulse_bpm": 68, "source": "watch",
+    }
+    earlier = await call(instance, "get_health_summary", date="2026-11-03")
+    assert earlier["blood_pressure_latest_reading"]["systolic_mmhg"] == 116  # last of 11-02
+    assert (await call(instance, "get_health_summary", date="2026-11-01"))["blood_pressure_latest_reading"] is None
+
+
+async def test_history_blood_pressure_per_day(api):
+    _, instance = api
+    data = await call(instance, "get_history", metric="blood_pressure_systolic", start="2026-11-01", end="2026-11-08")
+    assert data["rows"][0] == {"period_start": "2026-11-02", "mean": 119.0, "min": 116.0, "max": 122.0, "count": 2}
 
 
 async def test_history_measurement_mean_min_max(api):

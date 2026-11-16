@@ -104,6 +104,15 @@
       "energy_score": {
         "name": "Energy score"
       },
+      "blood_pressure_systolic": {
+        "name": "Systolic blood pressure"
+      },
+      "blood_pressure_diastolic": {
+        "name": "Diastolic blood pressure"
+      },
+      "blood_pressure_pulse": {
+        "name": "Blood pressure pulse"
+      },
       "last_cloud_sync": {
         "name": "Last cloud sync"
       }

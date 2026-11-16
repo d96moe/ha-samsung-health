@@ -1,7 +1,7 @@
 # Samsung Health for Home Assistant
 
 A custom integration that brings your **Samsung Health** data into Home Assistant:
-steps, active calories, body composition, sleep and recovery. It includes your full
+steps, active calories, body composition, sleep, recovery and blood pressure. It includes your full
 history as long-term statistics.
 
 Samsung Health writes incomplete data to Android's Health Connect: active calories
@@ -22,6 +22,7 @@ integration reads the same cloud sync that the Samsung Health app itself uses, t
 | Body | Weight, Body fat, Body fat mass, Skeletal muscle mass, Body water, BMR | Latest weighing |
 | Sleep | Sleep duration (actual sleep), Time in bed, Sleep score, Bedtime, Wake-up time | Last night, as the app shows it |
 | Recovery | Sleeping heart rate, Sleeping HRV, Energy score | Latest day |
+| Blood pressure | Systolic blood pressure, Diastolic blood pressure, Blood pressure pulse | Latest reading (attribute `source`: `cuff` or `watch`) |
 | Status | Last cloud sync, Cloud sync stale (problem) | — |
 | Control | Sync now (button) | Downloads right away instead of waiting for the next poll |
 | AI agents | LLM API *Samsung Health* (MCP) | See [AI agents (MCP)](#ai-agents-mcp-the-samsung-health-api) |
@@ -43,13 +44,17 @@ now** on the phone, then press **Sync now** in Home Assistant.
   that segment's length, and *Sleep duration* is the actual sleep time, its time in
   light, deep and REM sleep. Both matched the app to the minute on the nights
   checked. Old segments without sleep stages use time in bed × efficiency.
+- **Blood pressure from a cuff and the watch.** Every reading in Samsung Health
+  counts: from a cuff whose app writes to Samsung Health (for example Omron
+  Connect) and the Galaxy Watch's own readings once it is calibrated with a cuff.
+  The `source` attribute says which. Without any readings the sensors stay unknown.
 
 ### History
 
 Your full history, going back as far as your Samsung Health data does, is imported
 into Home Assistant's long-term statistics:
 
-- **Body, sleep and recovery** values are imported onto the sensors themselves. Open
+- **Body, sleep, recovery and blood pressure** values are imported onto the sensors themselves. Open
   *Weight*, for example, in the History panel or its more-info dialog, and you see
   every weighing back to the first one.
 - **Daily totals** (steps, active, total and exercise calories, active time,
@@ -178,8 +183,8 @@ nothing else in Home Assistant:
 
 | Tool | Returns |
 |---|---|
-| `get_health_summary` | One day (default today): steps, active, exercise and estimated total calories, active time, distance; the latest weighing with body composition, night of sleep and recovery values; that day's workouts; how fresh the data is |
-| `get_history` | One metric between two dates, per day, week or month: totals and daily averages for steps and calories; mean, min and max for weight, body composition, sleep and recovery |
+| `get_health_summary` | One day (default today): steps, active, exercise and estimated total calories, active time, distance; the latest weighing with body composition, night of sleep, recovery values and blood pressure reading; that day's workouts; how fresh the data is |
+| `get_history` | One metric between two dates, per day, week or month: totals and daily averages for steps and calories; mean, min and max for weight, body composition, sleep, recovery and blood pressure |
 | `get_workouts` | Workouts, newest first (default the latest 5): type, start and end, duration, calories, mean and max heart rate, distance |
 | `sync_now` | Downloads from Samsung Cloud now and waits for it, so the answer is fresh |
 

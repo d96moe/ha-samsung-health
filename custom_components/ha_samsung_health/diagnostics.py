@@ -24,6 +24,7 @@ async def async_get_config_entry_diagnostics(
         "counts": {
             "days": len(data.days),
             "body_measurements": len(data.body),
+            "blood_pressure_readings": len(data.blood_pressure),
             "sleep_sessions": len(data.sleep),
             "recovery_days": len(data.recovery),
             "exercise_sessions": len(data.exercises),

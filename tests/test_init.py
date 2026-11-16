@@ -15,6 +15,7 @@ from custom_components.ha_samsung_health.const import (
     CONF_STORAGE_KEY,
     DOMAIN,
     MANIFEST_ACTIVITY,
+    MANIFEST_BLOOD_PRESSURE,
     MANIFEST_EXERCISE,
     MANIFEST_SLEEP,
     MANIFEST_SLEEP_STAGE,
@@ -26,7 +27,18 @@ from custom_components.ha_samsung_health.const import (
 from custom_components.ha_samsung_health.coordinator import Prefetched, prefetched_store
 from custom_components.ha_samsung_health.diagnostics import async_get_config_entry_diagnostics
 
-from .helpers import CET, day_summary, exercise, sleep, sleep_stage, step_trend, vitality, weight
+from .helpers import (
+    CET,
+    WATCH_APP,
+    blood_pressure,
+    day_summary,
+    exercise,
+    sleep,
+    sleep_stage,
+    step_trend,
+    vitality,
+    weight,
+)
 
 NOW = datetime(2026, 11, 6, 11, 0, tzinfo=UTC)  # 12:00 in Stockholm
 
@@ -44,6 +56,10 @@ DOCS = {
         sleep_stage(SLEEP_START, SLEEP_START + timedelta(minutes=30), datetime(2026, 11, 6, 5, 30, tzinfo=UTC), stage=40002),
     ],
     MANIFEST_VITALITY: [vitality(2026, 11, 6, shr=60, shrv=40, score=70.0)],
+    MANIFEST_BLOOD_PRESSURE: [
+        blood_pressure(datetime(2026, 11, 5, 16, 30, tzinfo=UTC), systolic=118, diastolic=76, pulse=66),
+        blood_pressure(datetime(2026, 11, 6, 6, 10, tzinfo=UTC), systolic=121, diastolic=79, pulse=68, app=WATCH_APP),
+    ],
 }
 
 
@@ -70,7 +86,7 @@ class FakeApi:
     def fetch(self, manifest, revision):
         if FakeApi.gate is not None:
             FakeApi.gate.wait(5)
-        docs = FakeApi.docs[manifest]
+        docs = FakeApi.docs.get(manifest, [])  # a type left out: no data in the account
         if docs is MISSING:  # Samsung answered 404 for this type
             return FetchResult(manifest, revision, [], 0.1, missing=True)
         return FetchResult(manifest, revision, docs, 0.1)
@@ -181,6 +197,30 @@ async def test_setup_creates_sensors(hass, setup):
     assert float(state("time_in_bed").state) == 7.5
     assert state("sleep_duration").attributes["unit_of_measurement"] == "h"
     assert hass.states.get("binary_sensor.samsung_health_cloud_sync_stale").state == "off"
+
+
+async def test_blood_pressure_sensors_show_the_latest_reading(hass, setup):
+    entry, written = setup
+    await _load(hass, entry)
+    systolic = hass.states.get("sensor.samsung_health_systolic_blood_pressure")
+    assert float(systolic.state) == 121
+    assert systolic.attributes["unit_of_measurement"] == "mmHg"
+    assert systolic.attributes["state_class"] == "measurement"
+    assert systolic.attributes["measured_at"].startswith("2026-11-06T07:10")
+    assert systolic.attributes["source"] == "watch"
+    assert float(hass.states.get("sensor.samsung_health_diastolic_blood_pressure").state) == 79
+    assert float(hass.states.get("sensor.samsung_health_blood_pressure_pulse").state) == 68
+    assert "sensor.samsung_health_systolic_blood_pressure" in {sid for sid, _ in written}
+
+
+async def test_account_without_blood_pressure_still_loads(hass, setup):
+    # No monitor, no readings: Samsung may answer 404 for the type.
+    entry, _ = setup
+    FakeApi.docs = {**DOCS, MANIFEST_BLOOD_PRESSURE: MISSING}
+    await _load(hass, entry)
+    assert entry.runtime_data.last_update_success is True
+    assert hass.states.get("sensor.samsung_health_systolic_blood_pressure").state == "unknown"
+    assert float(hass.states.get("sensor.samsung_health_weight").state) == 80.5
 
 
 async def test_statistics_written_once_then_only_changes(hass, setup, freezer):

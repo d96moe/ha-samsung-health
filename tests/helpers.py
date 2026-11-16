@@ -75,6 +75,28 @@ def weight(at_utc: datetime, *, kg: float, bmr: int, offset: int = CET) -> dict:
     })
 
 
+CUFF_APP = "com.omronhealthcare.omronconnect"
+WATCH_APP = "com.samsung.android.shealthmonitor"
+
+
+def blood_pressure(at_utc: datetime, *, systolic: float, diastolic: float, pulse: int | None = 70,
+                   app: str = CUFF_APP, offset: int = CET) -> dict:
+    """A cuff reading (via its app) or a calibrated watch reading (mean 0, calibration_id)."""
+    watch = app == WATCH_APP
+    return env({
+        "datauuid": f"bp-{ms(at_utc)}",
+        "start_time": ms(at_utc),
+        "time_offset": offset,
+        "systolic": systolic,
+        "diastolic": diastolic,
+        "pulse": pulse,
+        "mean": 0.0 if watch or not (systolic and diastolic) else round((systolic + 2 * diastolic) / 3),
+        "pkg_name": app,
+        **({"calibration_id": "cal-1"} if watch else {}),
+        "update_time": ms(at_utc),
+    })
+
+
 def sleep(start_utc: datetime, end_utc: datetime, *, minutes: int, score: int, offset: int = CET,
           efficiency: float | None = None) -> dict:
     return env({

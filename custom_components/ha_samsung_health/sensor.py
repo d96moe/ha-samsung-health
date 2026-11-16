@@ -1,6 +1,6 @@
 """Sensors.
 
-Measurements (body, sleep, recovery) have state_class measurement: their full
+Measurements (body, sleep, recovery, blood pressure) have state_class measurement: their full
 history is imported onto the entity's own statistic, so the History panel shows it.
 Daily totals (steps, calories, active time, distance) reset at local midnight and
 have state_class total: the recorder compiles their statistics, and their whole
@@ -23,6 +23,7 @@ from homeassistant.const import (
     EntityCategory,
     UnitOfLength,
     UnitOfMass,
+    UnitOfPressure,
     UnitOfTime,
 )
 from homeassistant.core import HomeAssistant, callback
@@ -80,6 +81,19 @@ def _body(get: Callable[[parsers.BodyMeasurement], float | None]):
 def _body_attr(data: SamsungHealthData, now: datetime) -> dict[str, Any]:
     m = _latest_body(data)
     return {"measured_at": m.measured_at.isoformat()} if m else {}
+
+
+def _blood_pressure(get: Callable[[parsers.BloodPressureReading], float | None]):
+    def value(data: SamsungHealthData, now: datetime):
+        return get(data.blood_pressure[-1]) if data.blood_pressure else None
+    return value
+
+
+def _blood_pressure_attr(data: SamsungHealthData, now: datetime) -> dict[str, Any]:
+    if not data.blood_pressure:
+        return {}
+    r = data.blood_pressure[-1]
+    return {"measured_at": r.measured_at.isoformat(), "source": r.source}
 
 
 def _last_sleep(data: SamsungHealthData) -> parsers.SleepSession | None:
@@ -221,6 +235,22 @@ SENSORS: tuple[SamsungSensorDescription, ...] = (
         suggested_display_precision=0,
         value_fn=_recovery(lambda r: r.energy_score), attrs_fn=_recovery_attr,
     ),
+    # Blood pressure, latest reading
+    SamsungSensorDescription(
+        key="blood_pressure_systolic", translation_key="blood_pressure_systolic",
+        native_unit_of_measurement=UnitOfPressure.MMHG, icon="mdi:heart-box", suggested_display_precision=0,
+        value_fn=_blood_pressure(lambda r: r.systolic), attrs_fn=_blood_pressure_attr,
+    ),
+    SamsungSensorDescription(
+        key="blood_pressure_diastolic", translation_key="blood_pressure_diastolic",
+        native_unit_of_measurement=UnitOfPressure.MMHG, icon="mdi:heart-box-outline", suggested_display_precision=0,
+        value_fn=_blood_pressure(lambda r: r.diastolic), attrs_fn=_blood_pressure_attr,
+    ),
+    SamsungSensorDescription(
+        key="blood_pressure_pulse", translation_key="blood_pressure_pulse", native_unit_of_measurement="bpm",
+        icon="mdi:pulse", suggested_display_precision=0,
+        value_fn=_blood_pressure(lambda r: r.pulse), attrs_fn=_blood_pressure_attr,
+    ),
     # Status
     SamsungSensorDescription(
         key="last_cloud_sync", translation_key="last_cloud_sync", device_class=SensorDeviceClass.TIMESTAMP,
@@ -291,7 +321,7 @@ class SamsungHealthSensor(CoordinatorEntity[SamsungHealthCoordinator], RestoreSe
         last_data = await self.async_get_last_sensor_data()
         if last_state is None or last_data is None:
             return
-        attrs = {k: v for k, v in last_state.attributes.items() if k in ("date", "measured_at")}
+        attrs = {k: v for k, v in last_state.attributes.items() if k in ("date", "measured_at", "source")}
         if self.entity_description.attrs_fn is _today_attr and attrs.get("date") != dt_util.now().date().isoformat():
             return  # "today" values from an earlier day would be wrong
         self._restored_value = last_data.native_value

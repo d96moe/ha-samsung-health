@@ -28,6 +28,7 @@ from .const import (
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
     MANIFEST_ACTIVITY,
+    MANIFEST_BLOOD_PRESSURE,
     MANIFEST_EXERCISE,
     MANIFEST_SLEEP,
     MANIFEST_SLEEP_STAGE,
@@ -108,6 +109,7 @@ class SamsungHealthData:
     sleep: list[parsers.SleepSession] = field(default_factory=list)
     recovery: dict[date, parsers.RecoveryDay] = field(default_factory=dict)
     exercises: list[parsers.ExerciseSession] = field(default_factory=list)
+    blood_pressure: list[parsers.BloodPressureReading] = field(default_factory=list)
     last_cloud_update: datetime | None = None
     #: Diagnostics only: manifest -> (revision, document count, seconds)
     fetch_stats: dict[str, tuple[int, int, float]] = field(default_factory=dict)
@@ -234,6 +236,7 @@ def parse_documents(docs: dict[str, list[dict]], fetch_stats: Stats) -> SamsungH
         sleep=parsers.parse_sleep(docs[MANIFEST_SLEEP], docs[MANIFEST_SLEEP_STAGE]),
         recovery=parsers.parse_recovery(docs[MANIFEST_VITALITY]),
         exercises=exercises,
+        blood_pressure=parsers.parse_blood_pressure(docs.get(MANIFEST_BLOOD_PRESSURE, [])),
         last_cloud_update=dt_util.utc_from_timestamp(newest / 1000) if newest else None,
         fetch_stats=fetch_stats,
     )

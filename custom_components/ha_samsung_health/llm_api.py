@@ -145,6 +145,7 @@ def summary(data: SamsungHealthData, day: date, today: date, now: datetime) -> d
     sleep = next((s for s in reversed(data.sleep) if s.day <= day), None)
     recovery_day = max((d for d in data.recovery if d <= day), default=None)
     recovery = data.recovery.get(recovery_day) if recovery_day else None
+    bp = next((r for r in reversed(data.blood_pressure) if r.measured_at.date() <= day), None)
     return {
         "date": day.isoformat(),
         "activity": activity,
@@ -170,6 +171,13 @@ def summary(data: SamsungHealthData, day: date, today: date, now: datetime) -> d
             "sleeping_heart_rate_bpm": _r(recovery.sleeping_hr, 0),
             "sleeping_hrv_ms": _r(recovery.sleeping_hrv, 0),
             "energy_score": _r(recovery.energy_score, 0),
+        },
+        "blood_pressure_latest_reading": bp and {
+            "measured_at": bp.measured_at.isoformat(),
+            "systolic_mmhg": _r(bp.systolic, 0),
+            "diastolic_mmhg": _r(bp.diastolic, 0),
+            "pulse_bpm": _r(bp.pulse, 0),
+            "source": bp.source,
         },
         "workouts": [workout(s) for s in data.exercises if s.start.date() == day],
     }
@@ -248,8 +256,9 @@ class SummaryTool(_Tool):
     description = (
         "One day's health picture: steps, active, exercise and estimated total calories, "
         "active time and distance for that day; the latest weighing (weight and body "
-        "composition), night of sleep and recovery values on or before that day; and "
-        "that day's workouts. Defaults to today."
+        "composition), night of sleep, recovery values and blood pressure reading (from a "
+        "cuff or a calibrated watch) on or before that day; and that day's workouts. "
+        "Defaults to today."
     )
     parameters = schema_lib.Schema({
         schema_lib.Optional("date", description="YYYY-MM-DD; default today"): str,
@@ -268,7 +277,7 @@ class HistoryTool(_Tool):
     description = (
         "History of one metric between two dates, per day, week (starting Monday) or "
         "month. Daily totals (steps, calories) give the total and the daily average per "
-        "period; measurements (weight, body composition, sleep, recovery) give the mean, "
+        "period; measurements (weight, body composition, sleep, recovery, blood pressure) give the mean, "
         "min and max. History goes back to the first Samsung Health record."
     )
     parameters = schema_lib.Schema({

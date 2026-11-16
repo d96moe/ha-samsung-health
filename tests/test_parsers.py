@@ -6,6 +6,8 @@ from custom_components.ha_samsung_health import parsers
 
 from .helpers import (
     CEST,
+    WATCH_APP,
+    blood_pressure,
     day_summary,
     env,
     exercise,
@@ -134,6 +136,29 @@ def test_recovery_and_body():
     assert rec[date(2026, 11, 5)].sleeping_hr == 60
     body = parsers.parse_body([weight(datetime(2026, 11, 6, 6, 8, tzinfo=UTC), kg=80.5, bmr=1700)])
     assert body[0].weight == 80.5 and body[0].measured_at.hour == 7
+
+
+def test_blood_pressure_from_cuff_and_watch_sorted_in_local_time():
+    # Like the first readings (2026-11-15): cuff readings via its app, then the
+    # calibrated watch's own readings (mean 0, calibration_id) from Samsung's app.
+    readings = parsers.parse_blood_pressure([
+        blood_pressure(datetime(2026, 11, 16, 6, 10, tzinfo=UTC), systolic=121, diastolic=79, pulse=68,
+                       app=WATCH_APP),
+        blood_pressure(datetime(2026, 11, 15, 16, 30, tzinfo=UTC), systolic=118, diastolic=76, pulse=66),
+        blood_pressure(datetime(2026, 11, 15, 16, 35, tzinfo=UTC), systolic=115, diastolic=78, pulse=0),
+    ])
+    assert [(r.systolic, r.diastolic, r.pulse) for r in readings] == [(118, 76, 66), (115, 78, None), (121, 79, 68)]
+    assert readings[0].measured_at.hour == 17  # local time (CET)
+    assert [r.source for r in readings] == ["cuff", "cuff", "watch"]
+
+
+def test_blood_pressure_without_both_values_is_skipped():
+    at = datetime(2026, 11, 15, 16, 30, tzinfo=UTC)
+    assert parsers.parse_blood_pressure([
+        blood_pressure(at, systolic=0, diastolic=76),
+        blood_pressure(at, systolic=118, diastolic=None),  # type: ignore[arg-type]
+        env({"datauuid": "x", "systolic": 120, "diastolic": 80}),  # no time
+    ]) == []
 
 
 def test_bmr_rolling_median_and_before_first_weighing():

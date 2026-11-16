@@ -2,7 +2,7 @@
 
 Two kinds, because they behave differently:
 
-- Measurements (weight, body composition, sleep, recovery) are imported onto the
+- Measurements (weight, body composition, sleep, recovery, blood pressure) are imported onto the
   sensor entity's own statistic (statistic_id = the entity id, source "recorder";
   the entities have state_class measurement). So the full history shows up where
   you look for it: the entity's History and more-info graphs. The import upserts,
@@ -27,8 +27,8 @@ statistic although fingerprints exist (statistics deleted, database replaced),
 that statistic is rewritten in full.
 
 Daily rows sit at 12:00 UTC of their day (as in ha-workouts) so the recorder's
-local-day grouping never moves them across a day boundary. Body measurements
-sit at the start of the UTC hour they were taken in.
+local-day grouping never moves them across a day boundary. Body measurements and
+blood pressure readings sit at the start of the UTC hour they were taken in.
 """
 from __future__ import annotations
 
@@ -94,6 +94,9 @@ SPECS: dict[str, StatSpec] = {
         StatSpec("sleeping_heart_rate", "Samsung Health sleeping heart rate", "bpm", False),
         StatSpec("sleeping_hrv", "Samsung Health sleeping HRV", "ms", False),
         StatSpec("energy_score", "Samsung Health energy score", None, False),
+        StatSpec("blood_pressure_systolic", "Samsung Health systolic blood pressure", "mmHg", False),
+        StatSpec("blood_pressure_diastolic", "Samsung Health diastolic blood pressure", "mmHg", False),
+        StatSpec("blood_pressure_pulse", "Samsung Health blood pressure pulse", "bpm", False),
     )
 }
 
@@ -164,6 +167,11 @@ def build_series(data, today: date, today_fraction: float) -> Series:
         add("sleeping_heart_rate", day_bucket(day), r.sleeping_hr)
         add("sleeping_hrv", day_bucket(day), r.sleeping_hrv)
         add("energy_score", day_bucket(day), r.energy_score)
+
+    for bp in data.blood_pressure:
+        add("blood_pressure_systolic", hour_bucket(bp.measured_at), bp.systolic)
+        add("blood_pressure_diastolic", hour_bucket(bp.measured_at), bp.diastolic)
+        add("blood_pressure_pulse", hour_bucket(bp.measured_at), bp.pulse)
 
     # Several values in one bucket (two weighings in an hour, two sleeps ending the
     # same day): keep the last one.

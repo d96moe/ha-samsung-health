@@ -40,6 +40,10 @@ MANIFEST_SLEEP: Final = "com.samsung.health.sleep"
 # sleep time" is the segment's non-awake stage time (verified against two nights).
 MANIFEST_SLEEP_STAGE: Final = "com.samsung.health.sleep_stage"
 SLEEP_STAGE_AWAKE: Final = 40001
+# Blood pressure readings: from a cuff's own app (e.g. Omron Connect) and from a
+# calibrated Galaxy Watch (Samsung Health Monitor). Verified 2026-11-16.
+MANIFEST_BLOOD_PRESSURE: Final = "com.samsung.health.blood_pressure"
+BLOOD_PRESSURE_WATCH_APP: Final = "com.samsung.android.shealthmonitor"
 
 MANIFESTS: Final[dict[str, int]] = {
     MANIFEST_ACTIVITY: 5,
@@ -49,6 +53,7 @@ MANIFESTS: Final[dict[str, int]] = {
     MANIFEST_VITALITY: 3,
     MANIFEST_SLEEP: 19,
     MANIFEST_SLEEP_STAGE: 6,
+    MANIFEST_BLOOD_PRESSURE: 13,
 }
 
 # Empirical fit against 29 days of final values from the Samsung Health app

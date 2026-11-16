@@ -13,6 +13,7 @@ from datetime import UTC, date, datetime, timedelta, timezone
 from typing import Any
 
 from .const import (
+    BLOOD_PRESSURE_WATCH_APP,
     BMR_MEDIAN_WINDOW,
     SLEEP_STAGE_AWAKE,
     TOTAL_KCAL_ACTIVE_FACTOR,
@@ -102,6 +103,15 @@ class BodyMeasurement:
     skeletal_muscle_mass: float | None
     total_body_water: float | None
     bmr: float | None
+
+
+@dataclass(slots=True)
+class BloodPressureReading:
+    measured_at: datetime
+    systolic: float
+    diastolic: float
+    pulse: float | None
+    source: str  # "watch" (calibrated Galaxy Watch) or "cuff" (any other app)
 
 
 @dataclass(slots=True)
@@ -237,6 +247,29 @@ def parse_body(envelopes: Iterable[dict[str, Any]]) -> list[BodyMeasurement]:
             )
         )
     return sorted(out, key=lambda m: m.measured_at)
+
+
+def parse_blood_pressure(envelopes: Iterable[dict[str, Any]]) -> list[BloodPressureReading]:
+    """Every reading, cuff and watch alike; one without both values is skipped.
+
+    The watch's readings carry `mean` 0 (not measured), so `mean` isn't used.
+    """
+    out = []
+    for rec in records(envelopes):
+        measured_at = local_datetime(rec)
+        systolic, diastolic = _num(rec.get("systolic")), _num(rec.get("diastolic"))
+        if measured_at is None or not systolic or not diastolic:
+            continue
+        out.append(
+            BloodPressureReading(
+                measured_at=measured_at,
+                systolic=systolic,
+                diastolic=diastolic,
+                pulse=_num(rec.get("pulse")) or None,
+                source="watch" if rec.get("pkg_name") == BLOOD_PRESSURE_WATCH_APP else "cuff",
+            )
+        )
+    return sorted(out, key=lambda r: r.measured_at)
 
 
 SLEEP_DAY_SHIFT = timedelta(hours=6)

@@ -13,7 +13,7 @@ from custom_components.ha_samsung_health.statistics import (
     to_rows,
 )
 
-from .helpers import day_summary, step_trend, weight
+from .helpers import blood_pressure, day_summary, step_trend, weight
 
 
 def _data(*, extra_day: bool = False) -> SamsungHealthData:
@@ -47,6 +47,20 @@ def test_body_rows_are_mean_at_measurement_hour():
     assert row["start"] == datetime(2026, 10, 1, 6, tzinfo=UTC)
     assert row["mean"] == row["min"] == row["max"] == 90.0
     assert "sum" not in row
+
+
+def test_blood_pressure_rows_at_measurement_hour_last_reading_wins():
+    data = SamsungHealthData(blood_pressure=parsers.parse_blood_pressure([
+        blood_pressure(datetime(2026, 11, 15, 16, 30, tzinfo=UTC), systolic=118, diastolic=76, pulse=66),
+        blood_pressure(datetime(2026, 11, 15, 16, 40, tzinfo=UTC), systolic=115, diastolic=78, pulse=64),
+        blood_pressure(datetime(2026, 11, 16, 6, 10, tzinfo=UTC), systolic=121, diastolic=79, pulse=None),
+    ]))
+    series = build_series(data, today=date(2026, 11, 16), today_fraction=0.5)
+    hour = datetime(2026, 11, 15, 16, tzinfo=UTC)
+    assert series["blood_pressure_systolic"] == [(hour, 115.0), (datetime(2026, 11, 16, 6, tzinfo=UTC), 121.0)]
+    assert series["blood_pressure_diastolic"][0] == (hour, 78.0)
+    assert series["blood_pressure_pulse"] == [(hour, 64.0)]  # no pulse: no row
+    assert metadata(SPECS["blood_pressure_systolic"], "sensor.x")["unit_of_measurement"] == "mmHg"
 
 
 def test_month_fingerprints_and_first_changed_month():
